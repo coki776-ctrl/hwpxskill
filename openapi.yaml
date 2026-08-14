@@ -1,0 +1,119 @@
+openapi: 3.1.0
+info:
+  title: HWPX Skill API
+  version: 0.1.0
+  description: Inspect, validate, and edit HWPX documents while preserving their original structure.
+servers:
+  - url: https://REPLACE-WITH-YOUR-DEPLOYED-HOST
+paths:
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Check whether the HWPX API is running.
+      responses:
+        "200":
+          description: Service health.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: {type: string}
+                  service: {type: string}
+                  version: {type: string}
+  /inspect:
+    post:
+      operationId: inspectHwpx
+      summary: Extract editable paragraph and table-cell slots from an HWPX file.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                include_empty_cells:
+                  type: boolean
+                  default: true
+                preview_len:
+                  type: integer
+                  default: 80
+      responses:
+        "200":
+          description: Editable slots.
+          content:
+            application/json:
+              schema:
+                type: object
+  /validate:
+    post:
+      operationId: validateHwpx
+      summary: Validate HWPX ZIP/XML structure and report layout risks.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: Validation result.
+          content:
+            application/json:
+              schema:
+                type: object
+  /edit:
+    post:
+      operationId: editHwpx
+      summary: Edit text in an HWPX while preserving package, table, and paragraph structure.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                replacements:
+                  type: string
+                  description: JSON object mapping old text to new text.
+                slots:
+                  type: string
+                  description: JSON object mapping slot keys such as p:12 or cell:0:2:1 to new text.
+                paragraphs:
+                  type: string
+                  description: JSON object mapping paragraph indices to new text.
+                allow_over_budget:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          description: Edited HWPX file.
+          content:
+            application/hwp+zip:
+              schema:
+                type: string
+                format: binary
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
