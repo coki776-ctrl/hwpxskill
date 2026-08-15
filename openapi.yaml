@@ -4,7 +4,7 @@ info:
   version: 0.1.0
   description: Inspect, validate, and edit HWPX documents while preserving their original structure.
 servers:
-  - url: https://REPLACE-WITH-YOUR-DEPLOYED-HOST
+  - url: https://hwpxskill-api.onrender.com
 paths:
   /health:
     get:
