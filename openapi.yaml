@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: HWPX Skill API
-  version: 0.2.0
+  version: 0.2.1
   description: Inspect, validate, and edit HWPX documents through GPT Actions while preserving their original structure.
 
 servers:
@@ -20,11 +20,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
 
-  /action/inspect:
+  /action/inspect-page:
     post:
       operationId: inspectHwpx
-      summary: Inspect one HWPX file uploaded in the current ChatGPT conversation.
-      description: Use the HWPX file attached by the user. Send exactly one conversation file in openaiFileIdRefs.
+      summary: Inspect one HWPX file uploaded in the current ChatGPT conversation in small pages.
+      description: Use the user's HWPX file. Return only a small page of editable slots to avoid oversized Action responses. Use search_text when looking for a specific phrase. If has_more is true, call again with next_offset.
       security:
         - bearerAuth: []
       requestBody:
@@ -41,28 +41,43 @@ paths:
                   maxItems: 1
                   items:
                     type: string
-                  description: Exactly one user-uploaded .hwpx file from the current conversation.
+                  description: Exactly one user-uploaded .hwpx file from the current conversation. ChatGPT populates this automatically.
                 include_empty_cells:
                   type: boolean
-                  default: true
+                  default: false
+                  description: Include empty table cells only when they are needed for the requested edit.
                 preview_len:
                   type: integer
-                  default: 80
+                  default: 60
                   minimum: 10
-                  maximum: 300
+                  maximum: 120
+                offset:
+                  type: integer
+                  default: 0
+                  minimum: 0
+                  description: Starting slot offset for pagination.
+                limit:
+                  type: integer
+                  default: 50
+                  minimum: 1
+                  maximum: 100
+                  description: Number of slots to return. Prefer 50 or fewer.
+                search_text:
+                  type: string
+                  description: Optional case-insensitive phrase used to filter slot previews before pagination.
       responses:
         "200":
-          description: Editable paragraph and table-cell slots.
+          description: One compact page of editable paragraph and table-cell slots.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/InspectResponse"
+                $ref: "#/components/schemas/PagedInspectResponse"
 
   /action/validate:
     post:
       operationId: validateHwpx
       summary: Validate one HWPX file uploaded in the current ChatGPT conversation.
-      description: Use the HWPX file attached by the user. Send exactly one conversation file in openaiFileIdRefs.
+      description: Use the HWPX file attached by the user.
       security:
         - bearerAuth: []
       requestBody:
@@ -79,10 +94,10 @@ paths:
                   maxItems: 1
                   items:
                     type: string
-                  description: Exactly one user-uploaded .hwpx file from the current conversation.
+                  description: Exactly one user-uploaded .hwpx file from the current conversation. ChatGPT populates this automatically.
       responses:
         "200":
-          description: HWPX validation result.
+          description: Validation result.
           content:
             application/json:
               schema:
@@ -92,7 +107,7 @@ paths:
     post:
       operationId: editHwpx
       summary: Edit one HWPX file uploaded in the current ChatGPT conversation and return the edited HWPX.
-      description: First inspect the attached HWPX, then use slot keys or exact text replacements to make the requested edits. Send exactly one conversation file in openaiFileIdRefs.
+      description: Inspect first when needed, then send only the required replacements, slots, or paragraph edits. Preserve layout and structure unless the user explicitly requests otherwise.
       security:
         - bearerAuth: []
       requestBody:
@@ -109,36 +124,32 @@ paths:
                   maxItems: 1
                   items:
                     type: string
-                  description: Exactly one user-uploaded .hwpx file from the current conversation.
+                  description: Exactly one user-uploaded .hwpx file from the current conversation. ChatGPT populates this automatically.
                 replacements:
                   type: object
                   additionalProperties:
                     type: string
-                  description: Exact old-text to new-text replacements.
-                  default: {}
+                  description: Map exact old text to new text. Use only when the replacement is unambiguous.
                 slots:
                   type: object
                   additionalProperties:
                     type: string
-                  description: Slot-key to new-text mapping, such as p:12 or cell:0:2:1.
-                  default: {}
+                  description: Map slot keys such as p:12 or cell:0:2:1 to replacement text.
                 paragraphs:
                   type: object
                   additionalProperties:
                     type: string
-                  description: Paragraph-index to new-text mapping.
-                  default: {}
+                  description: Map paragraph indices to replacement text.
                 allow_over_budget:
                   type: boolean
                   default: false
-                  description: Keep false unless the user explicitly accepts layout overflow risk.
       responses:
         "200":
-          description: Edited HWPX returned to the ChatGPT conversation as a downloadable file.
+          description: Edit result containing the edited HWPX as an OpenAI file response.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EditActionResponse"
+                $ref: "#/components/schemas/EditResponse"
 
 components:
   schemas:
@@ -160,33 +171,49 @@ components:
           type: string
         kind:
           type: string
-        index:
-          type: integer
         max_chars:
-          type: integer
-        text_len:
-          type: integer
-        text_len_nospace:
           type: integer
         preview:
           type: string
+        table:
+          type: integer
+        row:
+          type: integer
+        col:
+          type: integer
+        occurrence:
+          type: integer
+        empty:
+          type: boolean
+      required: [key, kind, preview]
       additionalProperties: true
 
-    InspectResponse:
+    PagedInspectResponse:
       type: object
       properties:
         source:
           type: string
-        version:
+        total_slots:
           type: integer
-        usage:
-          type: string
+        matched_slots:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+        returned:
+          type: integer
+        has_more:
+          type: boolean
+        next_offset:
+          type: [integer, "null"]
+        search_text:
+          type: [string, "null"]
         slots:
           type: array
           items:
             $ref: "#/components/schemas/Slot"
-      required: [slots]
-      additionalProperties: true
+      required: [source, total_slots, matched_slots, offset, limit, returned, has_more, slots]
 
     ValidateResponse:
       type: object
@@ -205,7 +232,7 @@ components:
             type: string
       required: [valid, errors, layout_warning_count, layout_warnings]
 
-    ReturnedFile:
+    OpenAIFile:
       type: object
       properties:
         name:
@@ -217,7 +244,7 @@ components:
           format: byte
       required: [name, mime_type, content]
 
-    EditActionResponse:
+    EditResponse:
       type: object
       properties:
         ok:
@@ -229,7 +256,7 @@ components:
         openaiFileResponse:
           type: array
           items:
-            $ref: "#/components/schemas/ReturnedFile"
+            $ref: "#/components/schemas/OpenAIFile"
       required: [ok, validated, layout_warning_count, openaiFileResponse]
 
   securitySchemes:
