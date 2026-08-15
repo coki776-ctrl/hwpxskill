@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: HWPX Skill API
-  version: 0.2.1
-  description: Inspect, validate, and edit HWPX documents through GPT Actions while preserving their original structure.
+  version: 0.2.2
+  description: Inspect, search, validate, and edit HWPX documents through GPT Actions while preserving their original structure.
 
 servers:
   - url: https://hwpxskill-api.onrender.com
@@ -20,11 +20,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
 
-  /action/inspect-page:
+  /action/inspect-summary:
     post:
       operationId: inspectHwpx
-      summary: Inspect one HWPX file uploaded in the current ChatGPT conversation in small pages.
-      description: Use the user's HWPX file. Return only a small page of editable slots to avoid oversized Action responses. Use search_text when looking for a specific phrase. If has_more is true, call again with next_offset.
+      summary: Inspect an uploaded HWPX and return only a very small structural summary.
+      description: Use this first to confirm the HWPX can be read. It intentionally does not return the full slot list. For locating text to edit, call findHwpxText.
       security:
         - bearerAuth: []
       requestBody:
@@ -45,39 +45,71 @@ paths:
                 include_empty_cells:
                   type: boolean
                   default: false
-                  description: Include empty table cells only when they are needed for the requested edit.
                 preview_len:
                   type: integer
-                  default: 60
+                  default: 40
                   minimum: 10
-                  maximum: 120
-                offset:
-                  type: integer
-                  default: 0
-                  minimum: 0
-                  description: Starting slot offset for pagination.
-                limit:
-                  type: integer
-                  default: 50
-                  minimum: 1
-                  maximum: 100
-                  description: Number of slots to return. Prefer 50 or fewer.
-                search_text:
-                  type: string
-                  description: Optional case-insensitive phrase used to filter slot previews before pagination.
+                  maximum: 80
       responses:
         "200":
-          description: One compact page of editable paragraph and table-cell slots.
+          description: Compact document summary.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PagedInspectResponse"
+                $ref: "#/components/schemas/InspectSummaryResponse"
+
+  /action/find:
+    post:
+      operationId: findHwpxText
+      summary: Find a phrase in an uploaded HWPX and return at most ten matching editable slots.
+      description: Use this to locate exact slot keys before editing. Search with a distinctive phrase from the user's requested change. If too many results match, retry with a more specific phrase.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [openaiFileIdRefs, search_text]
+              properties:
+                openaiFileIdRefs:
+                  type: array
+                  minItems: 1
+                  maxItems: 1
+                  items:
+                    type: string
+                  description: Exactly one user-uploaded .hwpx file from the current conversation. ChatGPT populates this automatically.
+                search_text:
+                  type: string
+                  minLength: 1
+                  maxLength: 200
+                  description: Case-insensitive phrase to find in the HWPX.
+                include_empty_cells:
+                  type: boolean
+                  default: false
+                preview_len:
+                  type: integer
+                  default: 80
+                  minimum: 20
+                  maximum: 120
+                limit:
+                  type: integer
+                  default: 10
+                  minimum: 1
+                  maximum: 10
+      responses:
+        "200":
+          description: Compact list of matching editable slots.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FindResponse"
 
   /action/validate:
     post:
       operationId: validateHwpx
       summary: Validate one HWPX file uploaded in the current ChatGPT conversation.
-      description: Use the HWPX file attached by the user.
       security:
         - bearerAuth: []
       requestBody:
@@ -106,8 +138,8 @@ paths:
   /action/edit:
     post:
       operationId: editHwpx
-      summary: Edit one HWPX file uploaded in the current ChatGPT conversation and return the edited HWPX.
-      description: Inspect first when needed, then send only the required replacements, slots, or paragraph edits. Preserve layout and structure unless the user explicitly requests otherwise.
+      summary: Edit an uploaded HWPX and return the edited HWPX file.
+      description: Use findHwpxText first when exact slot keys are needed. Send only the edits requested by the user. Preserve the document structure and layout safeguards.
       security:
         - bearerAuth: []
       requestBody:
@@ -129,7 +161,7 @@ paths:
                   type: object
                   additionalProperties:
                     type: string
-                  description: Map exact old text to new text. Use only when the replacement is unambiguous.
+                  description: Map exact old text to new text when the replacement is unambiguous.
                 slots:
                   type: object
                   additionalProperties:
@@ -156,89 +188,76 @@ components:
     HealthResponse:
       type: object
       properties:
-        status:
-          type: string
-        service:
-          type: string
-        version:
-          type: string
+        status: {type: string}
+        service: {type: string}
+        version: {type: string}
       required: [status, service, version]
 
     Slot:
       type: object
       properties:
-        key:
-          type: string
-        kind:
-          type: string
-        max_chars:
-          type: integer
-        preview:
-          type: string
-        table:
-          type: integer
-        row:
-          type: integer
-        col:
-          type: integer
-        occurrence:
-          type: integer
-        empty:
-          type: boolean
+        key: {type: string}
+        kind: {type: string}
+        max_chars: {type: integer}
+        preview: {type: string}
+        table: {type: integer}
+        row: {type: integer}
+        col: {type: integer}
+        occurrence: {type: integer}
+        empty: {type: boolean}
       required: [key, kind, preview]
       additionalProperties: true
 
-    PagedInspectResponse:
+    InspectSummaryResponse:
       type: object
       properties:
-        source:
-          type: string
-        total_slots:
-          type: integer
-        matched_slots:
-          type: integer
-        offset:
-          type: integer
-        limit:
-          type: integer
-        returned:
-          type: integer
-        has_more:
-          type: boolean
-        next_offset:
-          type: [integer, "null"]
-        search_text:
-          type: [string, "null"]
-        slots:
+        ok: {type: boolean}
+        source: {type: string}
+        total_slots: {type: integer}
+        paragraph_slots: {type: integer}
+        cell_slots: {type: integer}
+        sample_slots:
           type: array
+          maxItems: 3
           items:
             $ref: "#/components/schemas/Slot"
-      required: [source, total_slots, matched_slots, offset, limit, returned, has_more, slots]
+        next_step: {type: string}
+      required: [ok, source, total_slots, paragraph_slots, cell_slots, sample_slots]
+
+    FindResponse:
+      type: object
+      properties:
+        ok: {type: boolean}
+        source: {type: string}
+        search_text: {type: string}
+        matched_slots: {type: integer}
+        returned: {type: integer}
+        truncated: {type: boolean}
+        slots:
+          type: array
+          maxItems: 10
+          items:
+            $ref: "#/components/schemas/Slot"
+      required: [ok, source, search_text, matched_slots, returned, truncated, slots]
 
     ValidateResponse:
       type: object
       properties:
-        valid:
-          type: boolean
+        valid: {type: boolean}
         errors:
           type: array
-          items:
-            type: string
-        layout_warning_count:
-          type: integer
+          items: {type: string}
+        layout_warning_count: {type: integer}
         layout_warnings:
           type: array
-          items:
-            type: string
+          items: {type: string}
       required: [valid, errors, layout_warning_count, layout_warnings]
 
     OpenAIFile:
       type: object
       properties:
-        name:
-          type: string
-        mime_type:
-          type: string
+        name: {type: string}
+        mime_type: {type: string}
         content:
           type: string
           format: byte
@@ -247,12 +266,9 @@ components:
     EditResponse:
       type: object
       properties:
-        ok:
-          type: boolean
-        validated:
-          type: boolean
-        layout_warning_count:
-          type: integer
+        ok: {type: boolean}
+        validated: {type: boolean}
+        layout_warning_count: {type: integer}
         openaiFileResponse:
           type: array
           items:
