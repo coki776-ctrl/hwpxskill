@@ -454,7 +454,7 @@ def action_create_from_template(payload: CreateFromTemplateRequest) -> ActionEdi
                 detail=f"Template has {len(paragraph_slots)} editable paragraphs but {len(content)} are required.",
             )
 
-        slot_values = {slot["key"]: "" for slot in slots}
+        slot_values = {slot["key"]: "" for slot in paragraph_slots}
         for slot, text in zip(paragraph_slots, content):
             slot_values[slot["key"]] = text
 

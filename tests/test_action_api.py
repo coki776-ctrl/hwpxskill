@@ -13,13 +13,25 @@ import action_ext
 import app as app_module
 
 
-def _write_hwpx(path: Path, paragraphs: int = 50, needle: str = "needle") -> None:
+def _write_hwpx(
+    path: Path, paragraphs: int = 50, needle: str = "needle", duplicate_cells: bool = False
+) -> None:
     ns = "http://www.hancom.co.kr/hwpml/2011/paragraph"
     body = "".join(
         f'<hp:p id="{index}" paraPrIDRef="0" styleIDRef="0"><hp:run charPrIDRef="0"><hp:t>{needle} paragraph {index}</hp:t></hp:run></hp:p>'
         for index in range(paragraphs)
     )
-    xml = f'<hp:sec xmlns:hp="{ns}">{body}</hp:sec>'
+    table = ""
+    if duplicate_cells:
+        cells = "".join(
+            '<hp:tc><hp:cellAddr rowAddr="0" colAddr="0"/>'
+            f'<hp:subList><hp:p id="{100 + index}" paraPrIDRef="0" styleIDRef="0">'
+            f'<hp:run charPrIDRef="0"><hp:t>以묐났? 湲곗〈蹂몃Ц {index}</hp:t></hp:run>'
+            '</hp:p></hp:subList></hp:tc>'
+            for index in range(2)
+        )
+        table = f'<hp:tbl rowCnt="1" colCnt="1"><hp:tr>{cells}</hp:tr></hp:tbl>'
+    xml = f'<hp:sec xmlns:hp="{ns}">{body}{table}</hp:sec>'
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr(
             zipfile.ZipInfo("mimetype"),
@@ -137,6 +149,32 @@ def test_create_from_template_replaces_body_and_returns_valid_hwpx(monkeypatch, 
     with zipfile.ZipFile(output) as archive:
         section = archive.read("Contents/section0.xml").decode("utf-8")
     assert "湲곗〈蹂몃Ц" not in section
+
+
+def test_create_from_template_ignores_duplicate_coordinate_cell_slots(monkeypatch, tmp_path):
+    source = tmp_path / "duplicate-cells.hwpx"
+    _write_hwpx(source, paragraphs=5, needle="湲곗〈蹂몃Ц", duplicate_cells=True)
+    profile = app_module.collect_slots(source, include_empty_cells=True)
+    assert any(slot["kind"] == "cell" and slot.get("occurrence") == 1 for slot in profile["slots"])
+    monkeypatch.setattr(app_module, "download_action_hwpx", lambda _ref, dst: dst.write_bytes(source.read_bytes()))
+    expected = ["???쒕ぉ", "泥??댁슜", "?섏㎏ ?댁슜"]
+
+    response = TestClient(action_ext.app).post(
+        "/action/create-from-template",
+        json=_payload(title=expected[0], paragraphs=expected[1:], output_filename="以묐났?_?앹꽦.hwpx"),
+    )
+    assert response.status_code == 200, response.text
+    output = tmp_path / "created.hwpx"
+    output.write_bytes(base64.b64decode(response.json()["openaiFileResponse"][0]["content"]))
+    assert app_module.validate_hwpx(str(output)) == []
+    assert app_module.structure_errors(source, output) == []
+    result = app_module.collect_slots(output, include_empty_cells=False)
+    previews = [slot["preview"] for slot in result["slots"] if slot["kind"] == "paragraph"]
+    assert previews == expected
+    with zipfile.ZipFile(output) as archive:
+        section = archive.read("Contents/section0.xml").decode("utf-8")
+    assert "湲곗〈蹂몃Ц" not in section
+    assert all(text in section for text in expected)
 
 
 def test_deployed_app_routes_and_operation_ids_are_unique():
