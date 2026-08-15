@@ -109,6 +109,36 @@ def test_action_edit_applies_eight_slot_edits_and_preserves_structure(monkeypatc
     assert all("2026?숇뀈?? not in slot["preview"] for slot in profile["slots"])
 
 
+def test_create_from_template_replaces_body_and_returns_valid_hwpx(monkeypatch, tmp_path):
+    source = tmp_path / "template.hwpx"
+    _write_hwpx(source, paragraphs=6, needle="湲곗〈蹂몃Ц")
+    monkeypatch.setattr(app_module, "download_action_hwpx", lambda _ref, dst: dst.write_bytes(source.read_bytes()))
+    expected = ["??臾몄꽌 ?쒕ぉ", "泥?踰덉㎏ ?댁슜", "??踰덉㎏ ?댁슜", "??踰덉㎏ ?댁슜"]
+
+    response = TestClient(action_ext.app).post(
+        "/action/create-from-template",
+        json=_payload(
+            title=expected[0],
+            paragraphs=expected[1:],
+            output_filename="?덈Ц??hwpx",
+        ),
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["validated"] is True
+    assert body["openaiFileResponse"][0]["name"] == "?덈Ц??hwpx"
+
+    output = tmp_path / "created.hwpx"
+    output.write_bytes(base64.b64decode(body["openaiFileResponse"][0]["content"]))
+    assert app_module.validate_hwpx(str(output)) == []
+    assert app_module.structure_errors(source, output) == []
+    profile = app_module.collect_slots(output, include_empty_cells=False)
+    assert [slot["preview"] for slot in profile["slots"]] == expected
+    with zipfile.ZipFile(output) as archive:
+        section = archive.read("Contents/section0.xml").decode("utf-8")
+    assert "湲곗〈蹂몃Ц" not in section
+
+
 def test_deployed_app_routes_and_operation_ids_are_unique():
     routes = {
         (route.path, method): getattr(route, "operation_id", None)
@@ -121,6 +151,7 @@ def test_deployed_app_routes_and_operation_ids_are_unique():
     assert routes[("/edit", "POST")] == "editHwpxMultipart"
     assert routes[("/action/inspect-summary", "POST")] == "inspectHwpx"
     assert routes[("/action/edit", "POST")] == "editHwpx"
+    assert routes[("/action/create-from-template", "POST")] == "createHwpxFromTemplate"
     operation_ids = [value for value in routes.values() if value]
     assert len(operation_ids) == len(set(operation_ids))
 
@@ -159,4 +190,19 @@ def test_committed_openapi_matches_action_request_and_response_shapes():
     assert action_route.operation_id == edit["operationId"]
     assert action_route.body_field.type_ is app_module.ActionEditRequest
     assert action_route.response_model is app_module.ActionEditResponse
+
+    create = spec["paths"]["/action/create-from-template"]["post"]
+    assert create["operationId"] == "createHwpxFromTemplate"
+    create_route = next(
+        route for route in action_ext.app.routes
+        if getattr(route, "path", None) == "/action/create-from-template"
+    )
+    assert create_route.operation_id == create["operationId"]
+    assert create_route.body_field.type_ is app_module.CreateFromTemplateRequest
+    assert create_route.response_model is app_module.ActionEditResponse
+    request_schema = spec["components"]["schemas"]["CreateFromTemplateRequest"]
+    runtime_schema = app_module.CreateFromTemplateRequest.model_json_schema()
+    assert set(request_schema["properties"]) == set(runtime_schema["properties"])
+    assert request_schema["additionalProperties"] is False
+    assert runtime_schema["additionalProperties"] is False
 
