@@ -9,9 +9,10 @@ import tempfile
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.background import BackgroundTasks
 from fastapi.responses import FileResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 ROOT = Path(__file__).resolve().parent
 SCRIPTS = ROOT / "scripts"
@@ -23,17 +24,27 @@ from page_guard import collect_metrics  # noqa: E402
 from validate import validate as validate_hwpx  # noqa: E402
 
 MAX_FILE_BYTES = int(os.getenv("HWPX_MAX_FILE_BYTES", str(25 * 1024 * 1024)))
+BEARER_SCHEME = HTTPBearer(auto_error=False)
 
 app = FastAPI(
     title="HWPX Skill API",
-    version="0.1.0",
+    version="0.1.1",
     description="Inspect, validate, and edit HWPX files while preserving their original structure.",
 )
 
 
-def require_api_key(authorization: Annotated[str | None, Header()] = None) -> None:
+def require_api_key(
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None,
+        Depends(BEARER_SCHEME),
+    ] = None,
+) -> None:
     expected = os.getenv("HWPX_API_KEY")
-    if expected and authorization != f"Bearer {expected}":
+    if not expected:
+        return
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise HTTPException(status_code=401, detail="Invalid or missing API key.")
+    if credentials.credentials != expected:
         raise HTTPException(status_code=401, detail="Invalid or missing API key.")
 
 
@@ -84,7 +95,7 @@ def structure_errors(reference: Path, output: Path) -> list[str]:
 
 @app.get("/health", operation_id="healthCheck")
 def health() -> dict[str, str]:
-    return {"status": "ok", "service": "hwpxskill-api", "version": "0.1.0"}
+    return {"status": "ok", "service": "hwpxskill-api", "version": "0.1.1"}
 
 
 @app.post("/inspect", operation_id="inspectHwpx", dependencies=[Depends(require_api_key)])
