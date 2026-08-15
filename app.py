@@ -24,7 +24,7 @@ SCRIPTS = ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 from finalize_hwpx import find_layout_warnings  # noqa: E402
-from hwpx_slots import collect_slots  # noqa: E402
+from hwpx_slots import collect_slots, summarize_slots  # noqa: E402
 from page_guard import collect_metrics  # noqa: E402
 from validate import validate as validate_hwpx  # noqa: E402
 
@@ -294,7 +294,7 @@ async def edit_hwpx(
 
 
 # GPT Action endpoints. ChatGPT sends conversation files through openaiFileIdRefs.
-@app.post("/action/inspect", operation_id="inspectHwpx", dependencies=[Depends(require_api_key)])
+@app.post("/action/inspect", operation_id="inspectHwpxLegacy", dependencies=[Depends(require_api_key)])
 def action_inspect_hwpx(payload: ActionInspectRequest) -> dict:
     ref = select_action_hwpx(payload.openaiFileIdRefs)
     with tempfile.TemporaryDirectory(prefix="hwpx-action-inspect-") as tmp:
@@ -303,13 +303,11 @@ def action_inspect_hwpx(payload: ActionInspectRequest) -> dict:
         errors = validate_hwpx(str(src))
         if errors:
             raise HTTPException(status_code=422, detail={"validation_errors": errors})
-        result = collect_slots(
-            src,
-            preview_len=max(10, min(payload.preview_len, 300)),
-            include_empty_cells=payload.include_empty_cells,
-        )
-        result["source"] = ref.name
-        return result
+        return {
+            "ok": True,
+            "source": ref.name,
+            **summarize_slots(src, include_empty_cells=payload.include_empty_cells),
+        }
 
 
 @app.post("/action/validate", operation_id="validateHwpx", dependencies=[Depends(require_api_key)])
@@ -368,3 +366,4 @@ def action_edit_hwpx(payload: ActionEditRequest) -> dict:
                 }
             ],
         }
+

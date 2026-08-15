@@ -9,18 +9,47 @@ from pydantic import BaseModel, Field
 from app import (
     ActionFileRef,
     app,
-    collect_slots,
     download_action_hwpx,
     require_api_key,
     select_action_hwpx,
     validate_hwpx,
 )
+from hwpx_slots import iter_slots, summarize_slots
 
 
 class ActionInspectSummaryRequest(BaseModel):
     openaiFileIdRefs: list[ActionFileRef]
     include_empty_cells: bool = False
-    preview_len: int = Field(default=40, ge=10, le=80)
+
+
+class InspectSummaryResponse(BaseModel):
+    ok: bool
+    source: str
+    total_slots: int
+    paragraph_slots: int
+    cell_slots: int
+
+
+class CompactSlot(BaseModel):
+    key: str
+    kind: str
+    max_chars: int
+    preview: str
+    table: int | None = None
+    row: int | None = None
+    col: int | None = None
+    occurrence: int | None = None
+    empty: bool | None = None
+
+
+class FindResponse(BaseModel):
+    ok: bool
+    source: str
+    search_text: str
+    matched_slots: int
+    returned: int
+    truncated: bool
+    slots: list[CompactSlot]
 
 
 class ActionFindRequest(BaseModel):
@@ -53,7 +82,7 @@ def _compact_slot(slot: dict) -> dict:
     return compact
 
 
-def _load_slots(refs: list[ActionFileRef], include_empty_cells: bool, preview_len: int):
+def _load_hwpx(refs: list[ActionFileRef]):
     ref = select_action_hwpx(refs)
     temp = tempfile.TemporaryDirectory(prefix="hwpx-action-inspect-")
     src = Path(temp.name) / "input.hwpx"
@@ -62,37 +91,23 @@ def _load_slots(refs: list[ActionFileRef], include_empty_cells: bool, preview_le
     if errors:
         temp.cleanup()
         raise HTTPException(status_code=422, detail={"validation_errors": errors})
-    result = collect_slots(
-        src,
-        preview_len=preview_len,
-        include_empty_cells=include_empty_cells,
-    )
-    return ref, result.get("slots", []), temp
+    return ref, src, temp
 
 
 @app.post(
     "/action/inspect-summary",
-    operation_id="inspectHwpxSummary",
+    operation_id="inspectHwpx",
     dependencies=[Depends(require_api_key)],
+    response_model=InspectSummaryResponse,
 )
-def action_inspect_hwpx_summary(payload: ActionInspectSummaryRequest) -> dict:
-    ref, slots, temp = _load_slots(
-        payload.openaiFileIdRefs,
-        payload.include_empty_cells,
-        payload.preview_len,
-    )
+def action_inspect_hwpx_summary(payload: ActionInspectSummaryRequest) -> InspectSummaryResponse:
+    ref, src, temp = _load_hwpx(payload.openaiFileIdRefs)
     try:
-        paragraph_count = sum(1 for slot in slots if slot.get("kind") == "paragraph")
-        cell_count = sum(1 for slot in slots if slot.get("kind") == "cell")
-        return {
+        return InspectSummaryResponse(**{
             "ok": True,
             "source": ref.name,
-            "total_slots": len(slots),
-            "paragraph_slots": paragraph_count,
-            "cell_slots": cell_count,
-            "sample_slots": [_compact_slot(slot) for slot in slots[:3]],
-            "next_step": "Use findHwpxText with a phrase from the user's requested edit to locate exact slot keys.",
-        }
+            **summarize_slots(src, include_empty_cells=payload.include_empty_cells),
+        })
     finally:
         temp.cleanup()
 
@@ -101,29 +116,29 @@ def action_inspect_hwpx_summary(payload: ActionInspectSummaryRequest) -> dict:
     "/action/find",
     operation_id="findHwpxText",
     dependencies=[Depends(require_api_key)],
+    response_model=FindResponse,
 )
-def action_find_hwpx_text(payload: ActionFindRequest) -> dict:
-    ref, slots, temp = _load_slots(
-        payload.openaiFileIdRefs,
-        payload.include_empty_cells,
-        payload.preview_len,
-    )
+def action_find_hwpx_text(payload: ActionFindRequest) -> FindResponse:
+    ref, src, temp = _load_hwpx(payload.openaiFileIdRefs)
     try:
         needle = payload.search_text.casefold()
-        matches = [
-            slot for slot in slots
-            if needle in str(slot.get("preview", "")).casefold()
-        ]
-        shown = matches[: payload.limit]
-        return {
+        matched = 0
+        shown = []
+        for slot in iter_slots(src, payload.preview_len, payload.include_empty_cells):
+            if needle not in str(slot.get("preview", "")).casefold():
+                continue
+            matched += 1
+            if len(shown) < payload.limit:
+                shown.append(slot)
+        return FindResponse(**{
             "ok": True,
             "source": ref.name,
             "search_text": payload.search_text,
-            "matched_slots": len(matches),
+            "matched_slots": matched,
             "returned": len(shown),
-            "truncated": len(matches) > len(shown),
+            "truncated": matched > len(shown),
             "slots": [_compact_slot(slot) for slot in shown],
-        }
+        })
     finally:
         temp.cleanup()
 
@@ -134,12 +149,9 @@ def action_find_hwpx_text(payload: ActionFindRequest) -> dict:
     dependencies=[Depends(require_api_key)],
 )
 def action_inspect_hwpx_page(payload: ActionInspectPageRequest) -> dict:
-    ref, all_slots, temp = _load_slots(
-        payload.openaiFileIdRefs,
-        payload.include_empty_cells,
-        payload.preview_len,
-    )
+    ref, src, temp = _load_hwpx(payload.openaiFileIdRefs)
     try:
+        all_slots = list(iter_slots(src, payload.preview_len, payload.include_empty_cells))
         filtered = all_slots
         query = (payload.search_text or "").strip()
         if query:
@@ -163,3 +175,4 @@ def action_inspect_hwpx_page(payload: ActionInspectPageRequest) -> dict:
         }
     finally:
         temp.cleanup()
+

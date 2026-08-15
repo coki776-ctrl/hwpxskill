@@ -40,16 +40,11 @@ paths:
                   minItems: 1
                   maxItems: 1
                   items:
-                    type: string
+                    $ref: "#/components/schemas/ActionFileRef"
                   description: Exactly one user-uploaded .hwpx file from the current conversation. ChatGPT populates this automatically.
                 include_empty_cells:
                   type: boolean
                   default: false
-                preview_len:
-                  type: integer
-                  default: 40
-                  minimum: 10
-                  maximum: 80
       responses:
         "200":
           description: Compact document summary.
@@ -78,7 +73,7 @@ paths:
                   minItems: 1
                   maxItems: 1
                   items:
-                    type: string
+                    $ref: "#/components/schemas/ActionFileRef"
                   description: Exactly one user-uploaded .hwpx file from the current conversation. ChatGPT populates this automatically.
                 search_text:
                   type: string
@@ -125,7 +120,7 @@ paths:
                   minItems: 1
                   maxItems: 1
                   items:
-                    type: string
+                    $ref: "#/components/schemas/ActionFileRef"
                   description: Exactly one user-uploaded .hwpx file from the current conversation. ChatGPT populates this automatically.
       responses:
         "200":
@@ -155,7 +150,7 @@ paths:
                   minItems: 1
                   maxItems: 1
                   items:
-                    type: string
+                    $ref: "#/components/schemas/ActionFileRef"
                   description: Exactly one user-uploaded .hwpx file from the current conversation. ChatGPT populates this automatically.
                 replacements:
                   type: object
@@ -185,6 +180,15 @@ paths:
 
 components:
   schemas:
+    ActionFileRef:
+      type: object
+      properties:
+        name: {type: string}
+        id: {type: [string, "null"]}
+        mime_type: {type: [string, "null"]}
+        download_link: {type: string, format: uri}
+      required: [name, download_link]
+
     HealthResponse:
       type: object
       properties:
@@ -216,13 +220,7 @@ components:
         total_slots: {type: integer}
         paragraph_slots: {type: integer}
         cell_slots: {type: integer}
-        sample_slots:
-          type: array
-          maxItems: 3
-          items:
-            $ref: "#/components/schemas/Slot"
-        next_step: {type: string}
-      required: [ok, source, total_slots, paragraph_slots, cell_slots, sample_slots]
+      required: [ok, source, total_slots, paragraph_slots, cell_slots]
 
     FindResponse:
       type: object
@@ -279,3 +277,4 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
+
