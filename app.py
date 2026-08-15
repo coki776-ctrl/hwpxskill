@@ -17,7 +17,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.background import BackgroundTasks
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 ROOT = Path(__file__).resolve().parent
 SCRIPTS = ROOT / "scripts"
@@ -56,12 +56,46 @@ class ActionValidateRequest(BaseModel):
     openaiFileIdRefs: list[ActionFileRef]
 
 
+class SlotEdit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    slot_key: str = Field(min_length=3, pattern=r"^(p:\d+|cell:\d+:\d+:\d+(?::\d+)?)$")
+    new_text: str
+
+
+class TextReplacement(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    old_text: str = Field(min_length=1)
+    new_text: str
+
+
+class ParagraphEdit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    paragraph_index: int = Field(ge=0)
+    new_text: str
+
+
 class ActionEditRequest(BaseModel):
     openaiFileIdRefs: list[ActionFileRef]
-    replacements: dict[str, str] = Field(default_factory=dict)
-    slots: dict[str, str] = Field(default_factory=dict)
-    paragraphs: dict[str, str] = Field(default_factory=dict)
+    slot_edits: list[SlotEdit] = Field(default_factory=list)
+    text_replacements: list[TextReplacement] = Field(default_factory=list)
+    paragraph_edits: list[ParagraphEdit] = Field(default_factory=list)
     allow_over_budget: bool = False
+
+
+class ActionOutputFile(BaseModel):
+    name: str
+    mime_type: str
+    content: str
+
+
+class ActionEditResponse(BaseModel):
+    ok: bool
+    validated: bool
+    layout_warning_count: int
+    openaiFileResponse: list[ActionOutputFile]
 
 
 def require_api_key(
@@ -109,6 +143,16 @@ def parse_mapping(raw: str | None, name: str) -> dict[str, str]:
 
 def normalize_mapping(value: dict[str, str] | None) -> dict[str, str]:
     return {str(k): "" if v is None else str(v) for k, v in (value or {}).items()}
+
+
+def action_edit_mappings(payload: ActionEditRequest) -> dict[str, dict[str, str]]:
+    return {
+        "replacements": {item.old_text: item.new_text for item in payload.text_replacements},
+        "slots": {item.slot_key: item.new_text for item in payload.slot_edits},
+        "paragraphs": {
+            str(item.paragraph_index): item.new_text for item in payload.paragraph_edits
+        },
+    }
 
 
 def structure_errors(reference: Path, output: Path) -> list[str]:
@@ -326,8 +370,13 @@ def action_validate_hwpx(payload: ActionValidateRequest) -> dict:
         }
 
 
-@app.post("/action/edit", operation_id="editHwpx", dependencies=[Depends(require_api_key)])
-def action_edit_hwpx(payload: ActionEditRequest) -> dict:
+@app.post(
+    "/action/edit",
+    operation_id="editHwpx",
+    dependencies=[Depends(require_api_key)],
+    response_model=ActionEditResponse,
+)
+def action_edit_hwpx(payload: ActionEditRequest) -> ActionEditResponse:
     ref = select_action_hwpx(payload.openaiFileIdRefs)
     with tempfile.TemporaryDirectory(prefix="hwpx-action-edit-") as tmp:
         workdir = Path(tmp)
@@ -339,11 +388,7 @@ def action_edit_hwpx(payload: ActionEditRequest) -> dict:
         if source_errors:
             raise HTTPException(status_code=422, detail={"validation_errors": source_errors})
 
-        maps = {
-            "replacements": normalize_mapping(payload.replacements),
-            "slots": normalize_mapping(payload.slots),
-            "paragraphs": normalize_mapping(payload.paragraphs),
-        }
+        maps = action_edit_mappings(payload)
         warning_count = run_edit(src, out, workdir, maps, payload.allow_over_budget)
 
         output_bytes = out.read_bytes()
@@ -354,7 +399,7 @@ def action_edit_hwpx(payload: ActionEditRequest) -> dict:
             )
 
         output_name = f"{Path(ref.name).stem}_edited.hwpx"
-        return {
+        return ActionEditResponse(**{
             "ok": True,
             "validated": True,
             "layout_warning_count": warning_count,
@@ -365,5 +410,5 @@ def action_edit_hwpx(payload: ActionEditRequest) -> dict:
                     "content": base64.b64encode(output_bytes).decode("ascii"),
                 }
             ],
-        }
+        })
 

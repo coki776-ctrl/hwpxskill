@@ -152,21 +152,24 @@ paths:
                   items:
                     $ref: "#/components/schemas/ActionFileRef"
                   description: Exactly one user-uploaded .hwpx file from the current conversation. ChatGPT populates this automatically.
-                replacements:
-                  type: object
-                  additionalProperties:
-                    type: string
-                  description: Map exact old text to new text when the replacement is unambiguous.
-                slots:
-                  type: object
-                  additionalProperties:
-                    type: string
-                  description: Map slot keys such as p:12 or cell:0:2:1 to replacement text.
-                paragraphs:
-                  type: object
-                  additionalProperties:
-                    type: string
-                  description: Map paragraph indices to replacement text.
+                slot_edits:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/SlotEdit"
+                  default: []
+                  description: Explicit edits using slot keys returned by findHwpxText.
+                text_replacements:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/TextReplacement"
+                  default: []
+                  description: Explicit exact-text replacements.
+                paragraph_edits:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/ParagraphEdit"
+                  default: []
+                  description: Explicit edits using zero-based paragraph indexes.
                 allow_over_budget:
                   type: boolean
                   default: false
@@ -188,6 +191,33 @@ components:
         mime_type: {type: [string, "null"]}
         download_link: {type: string, format: uri}
       required: [name, download_link]
+
+    SlotEdit:
+      type: object
+      properties:
+        slot_key:
+          type: string
+          minLength: 3
+          pattern: "^(p:\\d+|cell:\\d+:\\d+:\\d+(?::\\d+)?)$"
+        new_text: {type: string}
+      required: [slot_key, new_text]
+      additionalProperties: false
+
+    TextReplacement:
+      type: object
+      properties:
+        old_text: {type: string, minLength: 1}
+        new_text: {type: string}
+      required: [old_text, new_text]
+      additionalProperties: false
+
+    ParagraphEdit:
+      type: object
+      properties:
+        paragraph_index: {type: integer, minimum: 0}
+        new_text: {type: string}
+      required: [paragraph_index, new_text]
+      additionalProperties: false
 
     HealthResponse:
       type: object
