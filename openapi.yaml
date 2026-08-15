@@ -1,10 +1,12 @@
 openapi: 3.1.0
 info:
   title: HWPX Skill API
-  version: 0.1.1
-  description: Inspect, validate, and edit HWPX documents while preserving their original structure.
+  version: 0.2.0
+  description: Inspect, validate, and edit HWPX documents through GPT Actions while preserving their original structure.
+
 servers:
   - url: https://hwpxskill-api.onrender.com
+
 paths:
   /health:
     get:
@@ -17,97 +19,127 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
-  /inspect:
+
+  /action/inspect:
     post:
       operationId: inspectHwpx
-      summary: Extract editable paragraph and table-cell slots from an HWPX file.
+      summary: Inspect one HWPX file uploaded in the current ChatGPT conversation.
+      description: Use the HWPX file attached by the user. Send exactly one conversation file in openaiFileIdRefs.
       security:
         - bearerAuth: []
       requestBody:
         required: true
         content:
-          multipart/form-data:
+          application/json:
             schema:
               type: object
-              required: [file]
+              required: [openaiFileIdRefs]
               properties:
-                file:
-                  type: string
-                  format: binary
+                openaiFileIdRefs:
+                  type: array
+                  minItems: 1
+                  maxItems: 1
+                  items:
+                    type: string
+                  description: Exactly one user-uploaded .hwpx file from the current conversation.
                 include_empty_cells:
                   type: boolean
                   default: true
                 preview_len:
                   type: integer
                   default: 80
+                  minimum: 10
+                  maximum: 300
       responses:
         "200":
-          description: Editable slots.
+          description: Editable paragraph and table-cell slots.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/InspectResponse"
-  /validate:
+
+  /action/validate:
     post:
       operationId: validateHwpx
-      summary: Validate HWPX ZIP/XML structure and report layout risks.
+      summary: Validate one HWPX file uploaded in the current ChatGPT conversation.
+      description: Use the HWPX file attached by the user. Send exactly one conversation file in openaiFileIdRefs.
       security:
         - bearerAuth: []
       requestBody:
         required: true
         content:
-          multipart/form-data:
+          application/json:
             schema:
               type: object
-              required: [file]
+              required: [openaiFileIdRefs]
               properties:
-                file:
-                  type: string
-                  format: binary
+                openaiFileIdRefs:
+                  type: array
+                  minItems: 1
+                  maxItems: 1
+                  items:
+                    type: string
+                  description: Exactly one user-uploaded .hwpx file from the current conversation.
       responses:
         "200":
-          description: Validation result.
+          description: HWPX validation result.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ValidateResponse"
-  /edit:
+
+  /action/edit:
     post:
       operationId: editHwpx
-      summary: Edit text in an HWPX while preserving package, table, and paragraph structure.
+      summary: Edit one HWPX file uploaded in the current ChatGPT conversation and return the edited HWPX.
+      description: First inspect the attached HWPX, then use slot keys or exact text replacements to make the requested edits. Send exactly one conversation file in openaiFileIdRefs.
       security:
         - bearerAuth: []
       requestBody:
         required: true
         content:
-          multipart/form-data:
+          application/json:
             schema:
               type: object
-              required: [file]
+              required: [openaiFileIdRefs]
               properties:
-                file:
-                  type: string
-                  format: binary
+                openaiFileIdRefs:
+                  type: array
+                  minItems: 1
+                  maxItems: 1
+                  items:
+                    type: string
+                  description: Exactly one user-uploaded .hwpx file from the current conversation.
                 replacements:
-                  type: string
-                  description: JSON object mapping old text to new text.
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: Exact old-text to new-text replacements.
+                  default: {}
                 slots:
-                  type: string
-                  description: JSON object mapping slot keys such as p:12 or cell:0:2:1 to new text.
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: Slot-key to new-text mapping, such as p:12 or cell:0:2:1.
+                  default: {}
                 paragraphs:
-                  type: string
-                  description: JSON object mapping paragraph indices to new text.
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: Paragraph-index to new-text mapping.
+                  default: {}
                 allow_over_budget:
                   type: boolean
                   default: false
+                  description: Keep false unless the user explicitly accepts layout overflow risk.
       responses:
         "200":
-          description: Edited HWPX file.
+          description: Edited HWPX returned to the ChatGPT conversation as a downloadable file.
           content:
-            application/hwp+zip:
+            application/json:
               schema:
-                type: string
-                format: binary
+                $ref: "#/components/schemas/EditActionResponse"
+
 components:
   schemas:
     HealthResponse:
@@ -120,6 +152,7 @@ components:
         version:
           type: string
       required: [status, service, version]
+
     Slot:
       type: object
       properties:
@@ -138,6 +171,7 @@ components:
         preview:
           type: string
       additionalProperties: true
+
     InspectResponse:
       type: object
       properties:
@@ -153,6 +187,7 @@ components:
             $ref: "#/components/schemas/Slot"
       required: [slots]
       additionalProperties: true
+
     ValidateResponse:
       type: object
       properties:
@@ -169,6 +204,34 @@ components:
           items:
             type: string
       required: [valid, errors, layout_warning_count, layout_warnings]
+
+    ReturnedFile:
+      type: object
+      properties:
+        name:
+          type: string
+        mime_type:
+          type: string
+        content:
+          type: string
+          format: byte
+      required: [name, mime_type, content]
+
+    EditActionResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        validated:
+          type: boolean
+        layout_warning_count:
+          type: integer
+        openaiFileResponse:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReturnedFile"
+      required: [ok, validated, layout_warning_count, openaiFileResponse]
+
   securitySchemes:
     bearerAuth:
       type: http
