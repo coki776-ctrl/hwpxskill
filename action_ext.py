@@ -117,6 +117,7 @@ def action_inspect_hwpx_summary(payload: ActionInspectSummaryRequest) -> Inspect
     operation_id="findHwpxText",
     dependencies=[Depends(require_api_key)],
     response_model=FindResponse,
+    response_model_exclude_none=True,
 )
 def action_find_hwpx_text(payload: ActionFindRequest) -> FindResponse:
     ref, src, temp = _load_hwpx(payload.openaiFileIdRefs)
@@ -125,7 +126,7 @@ def action_find_hwpx_text(payload: ActionFindRequest) -> FindResponse:
         matched = 0
         shown = []
         for slot in iter_slots(src, payload.preview_len, payload.include_empty_cells):
-            if needle not in str(slot.get("preview", "")).casefold():
+            if needle not in str(slot.get("_full_text", "")).casefold():
                 continue
             matched += 1
             if len(shown) < payload.limit:

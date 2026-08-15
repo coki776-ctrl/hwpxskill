@@ -72,6 +72,7 @@ def _iter_paragraph_slots(root: etree._Element, preview_len: int) -> Iterator[di
                 "text_len": len(text),
                 "text_len_nospace": _normalized_len(text),
                 "preview": _preview(text, preview_len),
+                "_full_text": text,
             }
 
 
@@ -108,6 +109,7 @@ def _iter_cell_slots(
                     "text_len_nospace": _normalized_len(text),
                     "empty": not bool(text.strip()),
                     "preview": _preview(text, preview_len),
+                    "_full_text": text,
                 }
 
 
@@ -144,6 +146,8 @@ def collect_slots(
     include_empty_cells: bool = True,
 ) -> dict[str, Any]:
     slots = list(iter_slots(path, preview_len, include_empty_cells))
+    for slot in slots:
+        slot.pop("_full_text", None)
     return {
         "source": str(path),
         "version": 1,

@@ -67,6 +67,7 @@ def test_find_returns_at_most_ten_slots(monkeypatch, tmp_path):
     assert body["returned"] == 10
     assert body["truncated"] is True
     assert len(body["slots"]) == 10
+    assert "table" not in body["slots"][0]
 
 
 def test_deployed_app_routes_and_operation_ids_are_unique():
