@@ -177,6 +177,32 @@ def test_create_from_template_ignores_duplicate_coordinate_cell_slots(monkeypatc
     assert all(text in section for text in expected)
 
 
+def test_create_without_attachment_uses_server_blank_template(tmp_path):
+    expected = ["?쒕쾭 ?쒗뵆由??쒕ぉ", "蹂몃Ц ?섎굹", "蹂몃Ц ??]
+    response = TestClient(action_ext.app).post(
+        "/action/create",
+        json={
+            "title": expected[0],
+            "paragraphs": expected[1:],
+            "output_filename": "寃곌낵.hwpx",
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["openaiFileResponse"][0]["name"] == "寃곌낵.hwpx"
+    output = tmp_path / "created.hwpx"
+    output.write_bytes(base64.b64decode(body["openaiFileResponse"][0]["content"]))
+    assert app_module.validate_hwpx(str(output)) == []
+    assert app_module.structure_errors(app_module.BLANK_TEMPLATE, output) == []
+    with zipfile.ZipFile(output) as archive:
+        section = archive.read("Contents/section0.xml").decode("utf-8")
+    assert all(text in section for text in expected)
+    assert "TITLE_PLACEHOLDER" not in section
+    assert "BODY_PLACEHOLDER" not in section
+    profile = app_module.collect_slots(output, include_empty_cells=False)
+    assert [slot["preview"] for slot in profile["slots"]] == expected
+
+
 def test_deployed_app_routes_and_operation_ids_are_unique():
     routes = {
         (route.path, method): getattr(route, "operation_id", None)
@@ -190,6 +216,7 @@ def test_deployed_app_routes_and_operation_ids_are_unique():
     assert routes[("/action/inspect-summary", "POST")] == "inspectHwpx"
     assert routes[("/action/edit", "POST")] == "editHwpx"
     assert routes[("/action/create-from-template", "POST")] == "createHwpxFromTemplate"
+    assert routes[("/action/create", "POST")] == "createHwpx"
     operation_ids = [value for value in routes.values() if value]
     assert len(operation_ids) == len(set(operation_ids))
 
@@ -243,4 +270,18 @@ def test_committed_openapi_matches_action_request_and_response_shapes():
     assert set(request_schema["properties"]) == set(runtime_schema["properties"])
     assert request_schema["additionalProperties"] is False
     assert runtime_schema["additionalProperties"] is False
+
+    create_blank = spec["paths"]["/action/create"]["post"]
+    assert create_blank["operationId"] == "createHwpx"
+    create_blank_route = next(
+        route for route in action_ext.app.routes
+        if getattr(route, "path", None) == "/action/create"
+    )
+    assert create_blank_route.operation_id == create_blank["operationId"]
+    assert create_blank_route.body_field.type_ is app_module.CreateHwpxRequest
+    assert create_blank_route.response_model is app_module.ActionEditResponse
+    blank_schema = spec["components"]["schemas"]["CreateHwpxRequest"]
+    assert set(blank_schema["properties"]) == set(
+        app_module.CreateHwpxRequest.model_json_schema()["properties"]
+    )
 

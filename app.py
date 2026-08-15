@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 ROOT = Path(__file__).resolve().parent
 SCRIPTS = ROOT / "scripts"
+BLANK_TEMPLATE = ROOT / "templates" / "blank_template.hwpx"
 sys.path.insert(0, str(SCRIPTS))
 
 from finalize_hwpx import find_layout_warnings  # noqa: E402
@@ -105,6 +106,14 @@ class CreateFromTemplateRequest(BaseModel):
     title: str = Field(min_length=1)
     paragraphs: list[str] = Field(min_length=1)
     output_filename: str = Field(default="created_from_template.hwpx", min_length=6)
+
+
+class CreateHwpxRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1)
+    paragraphs: list[str] = Field(min_length=1, max_length=30)
+    output_filename: str = Field(default="created.hwpx", min_length=6)
 
 
 def require_api_key(
@@ -476,6 +485,53 @@ def action_create_from_template(payload: CreateFromTemplateRequest) -> ActionEdi
             openaiFileResponse=[ActionOutputFile(
                 name=output_filename,
                 mime_type="application/hwp+zip",
+                content=base64.b64encode(output_bytes).decode("ascii"),
+            )],
+        )
+
+
+@app.post(
+    "/action/create",
+    operation_id="createHwpx",
+    dependencies=[Depends(require_api_key)],
+    response_model=ActionEditResponse,
+)
+def action_create_hwpx(payload: CreateHwpxRequest) -> ActionEditResponse:
+    output_filename = payload.output_filename.strip()
+    if Path(output_filename).name != output_filename or not output_filename.lower().endswith(".hwpx"):
+        raise HTTPException(status_code=400, detail="output_filename must be a plain .hwpx filename.")
+    if not BLANK_TEMPLATE.is_file():
+        raise HTTPException(status_code=500, detail="Server blank HWPX template is missing.")
+
+    with tempfile.TemporaryDirectory(prefix="hwpx-action-create-blank-") as tmp:
+        workdir = Path(tmp)
+        src = workdir / "blank_template.hwpx"
+        out = workdir / "created.hwpx"
+        shutil.copyfile(BLANK_TEMPLATE, src)
+        source_errors = validate_hwpx(str(src))
+        if source_errors:
+            raise HTTPException(status_code=500, detail={"template_validation_errors": source_errors})
+
+        paragraph_slots = [
+            slot for slot in collect_slots(src, preview_len=40, include_empty_cells=False)["slots"]
+            if slot["kind"] == "paragraph"
+        ]
+        content = [payload.title, *payload.paragraphs]
+        slot_values = {slot["key"]: "" for slot in paragraph_slots}
+        for slot, text in zip(paragraph_slots, content):
+            slot_values[slot["key"]] = text
+        warning_count = run_edit(
+            src, out, workdir,
+            {"replacements": {}, "slots": slot_values, "paragraphs": {}},
+            allow_over_budget=True,
+        )
+        output_bytes = out.read_bytes()
+        if len(output_bytes) > ACTION_OUTPUT_MAX_FILE_BYTES:
+            raise HTTPException(status_code=413, detail="Created HWPX exceeds the 10 MB GPT Action returned-file limit.")
+        return ActionEditResponse(
+            ok=True, validated=True, layout_warning_count=warning_count,
+            openaiFileResponse=[ActionOutputFile(
+                name=output_filename, mime_type="application/hwp+zip",
                 content=base64.b64encode(output_bytes).decode("ascii"),
             )],
         )
