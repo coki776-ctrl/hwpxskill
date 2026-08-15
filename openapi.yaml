@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: HWPX Skill API
-  version: 0.1.0
+  version: 0.1.1
   description: Inspect, validate, and edit HWPX documents while preserving their original structure.
 servers:
   - url: https://hwpxskill-api.onrender.com
@@ -16,11 +16,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  status: {type: string}
-                  service: {type: string}
-                  version: {type: string}
+                $ref: "#/components/schemas/HealthResponse"
   /inspect:
     post:
       operationId: inspectHwpx
@@ -50,7 +46,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                $ref: "#/components/schemas/InspectResponse"
   /validate:
     post:
       operationId: validateHwpx
@@ -74,7 +70,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                $ref: "#/components/schemas/ValidateResponse"
   /edit:
     post:
       operationId: editHwpx
@@ -113,6 +109,66 @@ paths:
                 type: string
                 format: binary
 components:
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        service:
+          type: string
+        version:
+          type: string
+      required: [status, service, version]
+    Slot:
+      type: object
+      properties:
+        key:
+          type: string
+        kind:
+          type: string
+        index:
+          type: integer
+        max_chars:
+          type: integer
+        text_len:
+          type: integer
+        text_len_nospace:
+          type: integer
+        preview:
+          type: string
+      additionalProperties: true
+    InspectResponse:
+      type: object
+      properties:
+        source:
+          type: string
+        version:
+          type: integer
+        usage:
+          type: string
+        slots:
+          type: array
+          items:
+            $ref: "#/components/schemas/Slot"
+      required: [slots]
+      additionalProperties: true
+    ValidateResponse:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        errors:
+          type: array
+          items:
+            type: string
+        layout_warning_count:
+          type: integer
+        layout_warnings:
+          type: array
+          items:
+            type: string
+      required: [valid, errors, layout_warning_count, layout_warnings]
   securitySchemes:
     bearerAuth:
       type: http
