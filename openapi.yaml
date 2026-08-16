@@ -185,11 +185,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/EditResponse"
 
-  /action/create-rich-job:
+  /action/create-rich:
     post:
       operationId: createRichHwpx
-      summary: Start background generation of a professional HWPX with tables and PNG charts.
-      description: Starts a background job and returns job_id quickly. After this call, always call getRichHwpxJob with that job_id until status is completed or failed.
+      summary: Create a professional HWPX with tables and PNG charts.
+      description: Builds and validates the HWPX, then returns a temporary download URL through openaiFileResponse.
       security:
         - bearerAuth: []
       requestBody:
@@ -200,40 +200,11 @@ paths:
               $ref: "#/components/schemas/CreateRichHwpxRequest"
       responses:
         "200":
-          description: Background generation job started.
+          description: Rich HWPX generation result.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RichJobStartResponse"
-
-  /action/create-rich-job/{job_id}:
-    get:
-      operationId: getRichHwpxJob
-      summary: Wait briefly for a rich HWPX generation job and return its status.
-      description: Call after createRichHwpx. If running, call again. If completed, show download_url directly to the user as a clickable link; do not fetch that URL yourself.
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: job_id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: wait_seconds
-          in: query
-          required: false
-          schema:
-            type: integer
-            minimum: 0
-            maximum: 10
-            default: 8
-      responses:
-        "200":
-          description: Current generation status and final download URL when completed.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RichJobStatusResponse"
+                $ref: "#/components/schemas/RichActionResponse"
 
 components:
   schemas:
@@ -476,31 +447,20 @@ components:
           items: {$ref: "#/components/schemas/OpenAIFile"}
       required: [ok, validated, layout_warning_count, openaiFileResponse]
 
-    RichJobStartResponse:
+    RichActionResponse:
       type: object
       properties:
         ok: {type: boolean}
-        job_id: {type: string}
-        status: {type: string, enum: [pending]}
-        message: {type: string}
-      required: [ok, job_id, status, message]
-
-    RichJobStatusResponse:
-      type: object
-      properties:
-        ok: {type: boolean}
-        job_id: {type: string}
-        status: {type: string, enum: [pending, running, completed, failed]}
         validated: {type: boolean}
         layout_warning_count: {type: integer}
-        filename: {type: [string, "null"]}
-        download_url:
-          type: [string, "null"]
-          format: uri
-          description: When completed, present this URL to the user. Do not fetch it through an Action.
+        openaiFileResponse:
+          type: array
+          items:
+            type: string
+            format: uri
         error_stage: {type: [string, "null"]}
         error_message: {type: [string, "null"]}
-      required: [ok, job_id, status, validated, layout_warning_count]
+      required: [ok, validated, layout_warning_count, openaiFileResponse]
 
   securitySchemes:
     bearerAuth:
