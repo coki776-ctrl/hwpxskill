@@ -1,23 +1,39 @@
 from __future__ import annotations
 
-import base64
+import os
+import re
+import secrets
+import shutil
 import subprocess
 import tempfile
+import time
+import urllib.parse
 from pathlib import Path
 
-from fastapi import Depends
+from fastapi import Depends, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
 
 import app as app_module
 from action_ext import app
 from rich_charts import preprocess_chart_fences
 
 
+RETURN_DIR = Path(tempfile.gettempdir()) / "hwpx-action-return"
+RETURN_DIR.mkdir(parents=True, exist_ok=True)
+PUBLIC_BASE_URL = os.getenv(
+    "HWPX_PUBLIC_BASE_URL",
+    "https://hwpxskill-api.onrender.com",
+).rstrip("/")
+_RETURN_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{20,80}$")
+
+
 class RichActionResponse(BaseModel):
     ok: bool
     validated: bool
     layout_warning_count: int = 0
-    openaiFileResponse: list[app_module.ActionOutputFile] = Field(default_factory=list)
+    openaiFileResponse: list[str] = Field(default_factory=list)
     error_stage: str | None = None
     error_message: str | None = None
 
@@ -30,6 +46,50 @@ def _failure(stage: str, message: str) -> RichActionResponse:
         openaiFileResponse=[],
         error_stage=stage,
         error_message=(message or "Unknown error")[-2500:],
+    )
+
+
+def _cleanup_return_files(max_age_seconds: int = 3600) -> None:
+    cutoff = time.time() - max_age_seconds
+    try:
+        for path in RETURN_DIR.glob("*.hwpx"):
+            try:
+                if path.stat().st_mtime < cutoff:
+                    path.unlink(missing_ok=True)
+            except OSError:
+                continue
+    except OSError:
+        pass
+
+
+def _cache_return_file(source: Path, filename: str) -> str:
+    _cleanup_return_files()
+    token = secrets.token_urlsafe(24)
+    target = RETURN_DIR / f"{token}.hwpx"
+    shutil.copy2(source, target)
+    query = urllib.parse.urlencode({"name": filename})
+    return f"{PUBLIC_BASE_URL}/action/file/{token}?{query}"
+
+
+@app.get("/action/file/{token}", include_in_schema=False)
+def action_download_rich_file(token: str, name: str = "report.hwpx") -> FileResponse:
+    if not _RETURN_TOKEN_RE.fullmatch(token):
+        raise HTTPException(status_code=404, detail="File not found.")
+
+    path = RETURN_DIR / f"{token}.hwpx"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="File not found or expired.")
+
+    filename = Path(name).name
+    if not filename.lower().endswith(".hwpx"):
+        filename = "report.hwpx"
+
+    return FileResponse(
+        path,
+        media_type="application/hwp+zip",
+        filename=filename,
+        headers={"Cache-Control": "no-store"},
+        background=BackgroundTask(path.unlink, missing_ok=True),
     )
 
 
@@ -93,10 +153,10 @@ def action_create_rich_hwpx(
                 command,
                 capture_output=True,
                 text=True,
-                timeout=120,
+                timeout=40,
             )
         except subprocess.TimeoutExpired:
-            return _failure("kordoc_timeout", "Kordoc generation exceeded 120 seconds.")
+            return _failure("kordoc_timeout", "Kordoc generation exceeded 40 seconds.")
         except Exception as exc:
             return _failure("kordoc_launch", f"{type(exc).__name__}: {exc}")
 
@@ -118,25 +178,24 @@ def action_create_rich_hwpx(
             return _failure("output_validation", "; ".join(str(item) for item in errors))
 
         try:
-            output_bytes = output.read_bytes()
+            output_size = output.stat().st_size
         except Exception as exc:
             return _failure("output_read", f"{type(exc).__name__}: {exc}")
 
-        if len(output_bytes) > app_module.ACTION_OUTPUT_MAX_FILE_BYTES:
+        if output_size > app_module.ACTION_OUTPUT_MAX_FILE_BYTES:
             return _failure(
                 "output_size",
                 "Created HWPX exceeds the 10 MB GPT Action returned-file limit.",
             )
 
+        try:
+            file_url = _cache_return_file(output, filename)
+        except Exception as exc:
+            return _failure("file_cache", f"{type(exc).__name__}: {exc}")
+
         return RichActionResponse(
             ok=True,
             validated=True,
             layout_warning_count=len(app_module.find_layout_warnings(output)),
-            openaiFileResponse=[
-                app_module.ActionOutputFile(
-                    name=filename,
-                    mime_type="application/hwp+zip",
-                    content=base64.b64encode(output_bytes).decode("ascii"),
-                )
-            ],
+            openaiFileResponse=[file_url],
         )
