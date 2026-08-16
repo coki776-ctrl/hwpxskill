@@ -10,10 +10,9 @@ import time
 import urllib.parse
 from pathlib import Path
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from starlette.background import BackgroundTask
 
 import app as app_module
 from action_ext import app
@@ -71,8 +70,7 @@ def _cache_return_file(source: Path, filename: str) -> str:
     return f"{PUBLIC_BASE_URL}/action/file/{token}?{query}"
 
 
-@app.get("/action/file/{token}", include_in_schema=False)
-def action_download_rich_file(token: str, name: str = "report.hwpx") -> FileResponse:
+def _resolve_return_file(token: str, name: str) -> tuple[Path, str]:
     if not _RETURN_TOKEN_RE.fullmatch(token):
         raise HTTPException(status_code=404, detail="File not found.")
 
@@ -83,13 +81,31 @@ def action_download_rich_file(token: str, name: str = "report.hwpx") -> FileResp
     filename = Path(name).name
     if not filename.lower().endswith(".hwpx"):
         filename = "report.hwpx"
+    return path, filename
 
+
+@app.head("/action/file/{token}", include_in_schema=False)
+def action_head_rich_file(token: str, name: str = "report.hwpx") -> Response:
+    path, filename = _resolve_return_file(token, name)
+    return Response(
+        status_code=200,
+        headers={
+            "Content-Type": "application/hwp+zip",
+            "Content-Length": str(path.stat().st_size),
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@app.get("/action/file/{token}", include_in_schema=False)
+def action_download_rich_file(token: str, name: str = "report.hwpx") -> FileResponse:
+    path, filename = _resolve_return_file(token, name)
     return FileResponse(
         path,
         media_type="application/hwp+zip",
         filename=filename,
         headers={"Cache-Control": "no-store"},
-        background=BackgroundTask(path.unlink, missing_ok=True),
     )
 
 
