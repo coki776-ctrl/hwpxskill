@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: HWPX Skill API
-  version: 0.2.6
+  version: 0.3.0
   description: Inspect, search, validate, edit, and rebuild HWPX documents through GPT Actions.
 
 servers:
@@ -23,8 +23,8 @@ paths:
   /action/inspect-summary:
     post:
       operationId: inspectHwpx
-      summary: Inspect an uploaded HWPX and return only a very small structural summary.
-      description: Use this first to confirm the HWPX can be read. For rebuilding an attached HWPX, use inspectHwpxPage to read its text in pages.
+      summary: Inspect an uploaded HWPX and return a small structural summary.
+      description: Use this first to confirm an uploaded HWPX can be read. For rebuilding, use inspectHwpxPage to read its text in chunks.
       security:
         - bearerAuth: []
       requestBody:
@@ -41,7 +41,6 @@ paths:
                   maxItems: 1
                   items:
                     $ref: "#/components/schemas/ActionFileRef"
-                  description: Exactly one user-uploaded .hwpx file from the current conversation. ChatGPT populates this automatically.
                 include_empty_cells:
                   type: boolean
                   default: false
@@ -57,7 +56,7 @@ paths:
     post:
       operationId: inspectHwpxPage
       summary: Read text from an uploaded HWPX in small paged chunks.
-      description: Read attached HWPX text for rebuilding. Start at offset 0 and repeat with next_offset until has_more is false, then call createRichHwpx with the reconstructed content.
+      description: For rich rebuilds, start at offset 0 and repeat with next_offset until has_more is false. Then call createRichHwpx with the reconstructed content.
       security:
         - bearerAuth: []
       requestBody:
@@ -65,37 +64,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [openaiFileIdRefs]
-              properties:
-                openaiFileIdRefs:
-                  type: array
-                  minItems: 1
-                  maxItems: 1
-                  items:
-                    $ref: "#/components/schemas/ActionFileRef"
-                  description: Exactly one user-uploaded .hwpx file from the current conversation.
-                include_empty_cells:
-                  type: boolean
-                  default: false
-                preview_len:
-                  type: integer
-                  default: 80
-                  minimum: 10
-                  maximum: 80
-                offset:
-                  type: integer
-                  default: 0
-                  minimum: 0
-                limit:
-                  type: integer
-                  default: 10
-                  minimum: 1
-                  maximum: 10
-                search_text:
-                  type: [string, "null"]
-                  maxLength: 200
-                  default: null
+              $ref: "#/components/schemas/InspectPageRequest"
       responses:
         "200":
           description: One page of HWPX text slots.
@@ -107,8 +76,8 @@ paths:
   /action/find:
     post:
       operationId: findHwpxText
-      summary: Find a phrase in an uploaded HWPX and return at most ten matching editable slots.
-      description: Use this to locate exact slot keys before editing. Search with a distinctive phrase from the user's requested change. If too many results match, retry with a more specific phrase.
+      summary: Find a phrase in an uploaded HWPX and return matching editable slots.
+      description: Use this to locate exact slot keys before minimal edits. Retry with a more specific phrase if too many results match.
       security:
         - bearerAuth: []
       requestBody:
@@ -116,37 +85,10 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [openaiFileIdRefs, search_text]
-              properties:
-                openaiFileIdRefs:
-                  type: array
-                  minItems: 1
-                  maxItems: 1
-                  items:
-                    $ref: "#/components/schemas/ActionFileRef"
-                  description: Exactly one user-uploaded .hwpx file from the current conversation. ChatGPT populates this automatically.
-                search_text:
-                  type: string
-                  minLength: 1
-                  maxLength: 200
-                  description: Case-insensitive phrase to find in the HWPX.
-                include_empty_cells:
-                  type: boolean
-                  default: false
-                preview_len:
-                  type: integer
-                  default: 80
-                  minimum: 20
-                  maximum: 120
-                limit:
-                  type: integer
-                  default: 10
-                  minimum: 1
-                  maximum: 10
+              $ref: "#/components/schemas/FindRequest"
       responses:
         "200":
-          description: Compact list of matching editable slots.
+          description: Compact matching slots.
           content:
             application/json:
               schema:
@@ -155,7 +97,7 @@ paths:
   /action/validate:
     post:
       operationId: validateHwpx
-      summary: Validate one HWPX file uploaded in the current ChatGPT conversation.
+      summary: Validate one HWPX file uploaded in the current conversation.
       security:
         - bearerAuth: []
       requestBody:
@@ -172,7 +114,6 @@ paths:
                   maxItems: 1
                   items:
                     $ref: "#/components/schemas/ActionFileRef"
-                  description: Exactly one user-uploaded .hwpx file from the current conversation. ChatGPT populates this automatically.
       responses:
         "200":
           description: Validation result.
@@ -184,8 +125,8 @@ paths:
   /action/edit:
     post:
       operationId: editHwpx
-      summary: Make minimal text or value edits to an existing HWPX while preserving its current structure and layout.
-      description: Use only for minimal text/value edits while preserving structure. If the user asks for charts, new tables, redesign, title styling, emphasis, reorganization, or a one-page/richer report, use createRichHwpx instead—even when an HWPX is attached.
+      summary: Make minimal text or value edits while preserving current HWPX structure.
+      description: Use only for minimal edits. For charts, new tables, redesign, hierarchy, emphasis, reorganization, or richer reports, use createRichHwpx instead.
       security:
         - bearerAuth: []
       requestBody:
@@ -193,40 +134,10 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [openaiFileIdRefs]
-              properties:
-                openaiFileIdRefs:
-                  type: array
-                  minItems: 1
-                  maxItems: 1
-                  items:
-                    $ref: "#/components/schemas/ActionFileRef"
-                  description: Exactly one user-uploaded .hwpx file from the current conversation. ChatGPT populates this automatically.
-                slot_edits:
-                  type: array
-                  items:
-                    $ref: "#/components/schemas/SlotEdit"
-                  default: []
-                  description: Explicit edits using slot keys returned by findHwpxText.
-                text_replacements:
-                  type: array
-                  items:
-                    $ref: "#/components/schemas/TextReplacement"
-                  default: []
-                  description: Explicit exact-text replacements.
-                paragraph_edits:
-                  type: array
-                  items:
-                    $ref: "#/components/schemas/ParagraphEdit"
-                  default: []
-                  description: Explicit edits using zero-based paragraph indexes.
-                allow_over_budget:
-                  type: boolean
-                  default: false
+              $ref: "#/components/schemas/EditRequest"
       responses:
         "200":
-          description: Edit result containing the edited HWPX as an OpenAI file response.
+          description: Edited HWPX result.
           content:
             application/json:
               schema:
@@ -235,8 +146,8 @@ paths:
   /action/create-from-template:
     post:
       operationId: createHwpxFromTemplate
-      summary: Create a new HWPX using an uploaded HWPX as the formatting template.
-      description: Use this only when the user explicitly wants to preserve and reuse the uploaded HWPX formatting as the template for a new document. If the user instead asks for redesign, richer presentation, new charts, new tables, or visual restructuring, use createRichHwpx.
+      summary: Create a new HWPX using an uploaded HWPX as its formatting template.
+      description: Use only when the user wants to preserve uploaded formatting. For visual redesign, new tables, or charts, use createRichHwpx.
       security:
         - bearerAuth: []
       requestBody:
@@ -247,7 +158,7 @@ paths:
               $ref: "#/components/schemas/CreateFromTemplateRequest"
       responses:
         "200":
-          description: Created HWPX returned as an OpenAI file response.
+          description: Created HWPX result.
           content:
             application/json:
               schema:
@@ -256,8 +167,8 @@ paths:
   /action/create:
     post:
       operationId: createHwpx
-      summary: Create a very simple new HWPX from the server blank template.
-      description: Use only for simple title-and-paragraph documents that do not need tables, charts, richer hierarchy, or report redesign. For professional reports or visually structured documents, use createRichHwpx.
+      summary: Create a simple title-and-paragraph HWPX.
+      description: Use only for simple documents without tables, charts, or rich hierarchy. For professional reports use createRichHwpx.
       security:
         - bearerAuth: []
       requestBody:
@@ -268,17 +179,17 @@ paths:
               $ref: "#/components/schemas/CreateHwpxRequest"
       responses:
         "200":
-          description: Created HWPX returned as an OpenAI file response.
+          description: Created HWPX result.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/EditResponse"
 
-  /action/create-rich:
+  /action/create-rich-job:
     post:
       operationId: createRichHwpx
-      summary: Create or rebuild a professionally formatted HWPX with headings, tables, emphasis, and embedded PNG charts.
-      description: Use for professional report generation or redesign. With an attached HWPX, read it via inspectHwpxPage first, then rebuild. Include ```chart fences for PNG charts. Example values are allowed only when explicitly authorized.
+      summary: Start background generation of a professional HWPX with tables and PNG charts.
+      description: Starts a background job and returns job_id quickly. After this call, always call getRichHwpxJob with that job_id until status is completed or failed.
       security:
         - bearerAuth: []
       requestBody:
@@ -289,11 +200,40 @@ paths:
               $ref: "#/components/schemas/CreateRichHwpxRequest"
       responses:
         "200":
-          description: Rich HWPX returned through a short-lived download URL in openaiFileResponse.
+          description: Background generation job started.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RichResponse"
+                $ref: "#/components/schemas/RichJobStartResponse"
+
+  /action/create-rich-job/{job_id}:
+    get:
+      operationId: getRichHwpxJob
+      summary: Wait briefly for a rich HWPX generation job and return its status.
+      description: Call after createRichHwpx. If running, call again. If completed, show download_url directly to the user as a clickable link; do not fetch that URL yourself.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: wait_seconds
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 10
+            default: 8
+      responses:
+        "200":
+          description: Current generation status and final download URL when completed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RichJobStatusResponse"
 
 components:
   schemas:
@@ -333,11 +273,71 @@ components:
       required: [paragraph_index, new_text]
       additionalProperties: false
 
+    InspectPageRequest:
+      type: object
+      properties:
+        openaiFileIdRefs:
+          type: array
+          minItems: 1
+          maxItems: 1
+          items:
+            $ref: "#/components/schemas/ActionFileRef"
+        include_empty_cells: {type: boolean, default: false}
+        preview_len: {type: integer, minimum: 10, maximum: 80, default: 80}
+        offset: {type: integer, minimum: 0, default: 0}
+        limit: {type: integer, minimum: 1, maximum: 10, default: 10}
+        search_text: {type: [string, "null"], maxLength: 200, default: null}
+      required: [openaiFileIdRefs]
+      additionalProperties: false
+
+    FindRequest:
+      type: object
+      properties:
+        openaiFileIdRefs:
+          type: array
+          minItems: 1
+          maxItems: 1
+          items:
+            $ref: "#/components/schemas/ActionFileRef"
+        search_text: {type: string, minLength: 1, maxLength: 200}
+        include_empty_cells: {type: boolean, default: false}
+        preview_len: {type: integer, minimum: 20, maximum: 120, default: 80}
+        limit: {type: integer, minimum: 1, maximum: 10, default: 10}
+      required: [openaiFileIdRefs, search_text]
+      additionalProperties: false
+
+    EditRequest:
+      type: object
+      properties:
+        openaiFileIdRefs:
+          type: array
+          minItems: 1
+          maxItems: 1
+          items:
+            $ref: "#/components/schemas/ActionFileRef"
+        slot_edits:
+          type: array
+          items: {$ref: "#/components/schemas/SlotEdit"}
+          default: []
+        text_replacements:
+          type: array
+          items: {$ref: "#/components/schemas/TextReplacement"}
+          default: []
+        paragraph_edits:
+          type: array
+          items: {$ref: "#/components/schemas/ParagraphEdit"}
+          default: []
+        allow_over_budget: {type: boolean, default: false}
+      required: [openaiFileIdRefs]
+      additionalProperties: false
+
     CreateFromTemplateRequest:
       type: object
       properties:
         openaiFileIdRefs:
           type: array
+          minItems: 1
+          maxItems: 1
           items:
             $ref: "#/components/schemas/ActionFileRef"
         title: {type: string, minLength: 1}
@@ -345,10 +345,7 @@ components:
           type: array
           minItems: 1
           items: {type: string}
-        output_filename:
-          type: string
-          minLength: 6
-          default: created_from_template.hwpx
+        output_filename: {type: string, minLength: 6, default: created_from_template.hwpx}
       required: [openaiFileIdRefs, title, paragraphs]
       additionalProperties: false
 
@@ -361,22 +358,19 @@ components:
           minItems: 1
           maxItems: 30
           items: {type: string}
-        output_filename:
-          type: string
-          minLength: 6
-          default: created.hwpx
+        output_filename: {type: string, minLength: 6, default: created.hwpx}
       required: [title, paragraphs]
       additionalProperties: false
 
     CreateRichHwpxRequest:
       type: object
-      description: Markdown for a new or rebuilt rich HWPX. For charts, include a ```chart code fence in markdown; the server converts it to an embedded PNG image.
+      description: Markdown for a new or rebuilt rich HWPX. Use ```chart fences for server-rendered PNG charts.
       properties:
         filename: {type: string, minLength: 6, default: report.hwpx}
         markdown:
           type: string
           minLength: 1
-          description: Full Markdown document. May include tables and ```chart code fences for server-rendered PNG charts.
+          description: Full Markdown document. May contain Markdown tables and ```chart fences.
         preset:
           type: string
           enum: [보고서, 기안문, 계획서, 통지, 회의록, 개조식, 보도자료]
@@ -430,8 +424,9 @@ components:
         slots:
           type: array
           maxItems: 10
-          items:
-            $ref: "#/components/schemas/Slot"
+          items: {$ref: "#/components/schemas/Slot"}
+        error_stage: {type: [string, "null"]}
+        error_message: {type: [string, "null"]}
       required: [ok, source, matched_slots, offset, returned, has_more, slots]
 
     FindResponse:
@@ -446,8 +441,7 @@ components:
         slots:
           type: array
           maxItems: 10
-          items:
-            $ref: "#/components/schemas/Slot"
+          items: {$ref: "#/components/schemas/Slot"}
       required: [ok, source, search_text, matched_slots, returned, truncated, slots]
 
     ValidateResponse:
@@ -468,9 +462,7 @@ components:
       properties:
         name: {type: string}
         mime_type: {type: string}
-        content:
-          type: string
-          format: byte
+        content: {type: string, format: byte}
       required: [name, mime_type, content]
 
     EditResponse:
@@ -481,24 +473,34 @@ components:
         layout_warning_count: {type: integer}
         openaiFileResponse:
           type: array
-          items:
-            $ref: "#/components/schemas/OpenAIFile"
+          items: {$ref: "#/components/schemas/OpenAIFile"}
       required: [ok, validated, layout_warning_count, openaiFileResponse]
 
-    RichResponse:
+    RichJobStartResponse:
       type: object
       properties:
         ok: {type: boolean}
+        job_id: {type: string}
+        status: {type: string, enum: [pending]}
+        message: {type: string}
+      required: [ok, job_id, status, message]
+
+    RichJobStatusResponse:
+      type: object
+      properties:
+        ok: {type: boolean}
+        job_id: {type: string}
+        status: {type: string, enum: [pending, running, completed, failed]}
         validated: {type: boolean}
         layout_warning_count: {type: integer}
-        openaiFileResponse:
-          type: array
-          items:
-            type: string
-            format: uri
+        filename: {type: [string, "null"]}
+        download_url:
+          type: [string, "null"]
+          format: uri
+          description: When completed, present this URL to the user. Do not fetch it through an Action.
         error_stage: {type: [string, "null"]}
         error_message: {type: [string, "null"]}
-      required: [ok, validated, layout_warning_count, openaiFileResponse]
+      required: [ok, job_id, status, validated, layout_warning_count]
 
   securitySchemes:
     bearerAuth:
