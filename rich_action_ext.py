@@ -1,14 +1,36 @@
 from __future__ import annotations
 
 import base64
+import subprocess
 import tempfile
 from pathlib import Path
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends
+from pydantic import BaseModel, Field
 
 import app as app_module
 from action_ext import app
 from rich_charts import preprocess_chart_fences
+
+
+class RichActionResponse(BaseModel):
+    ok: bool
+    validated: bool
+    layout_warning_count: int = 0
+    openaiFileResponse: list[app_module.ActionOutputFile] = Field(default_factory=list)
+    error_stage: str | None = None
+    error_message: str | None = None
+
+
+def _failure(stage: str, message: str) -> RichActionResponse:
+    return RichActionResponse(
+        ok=False,
+        validated=False,
+        layout_warning_count=0,
+        openaiFileResponse=[],
+        error_stage=stage,
+        error_message=(message or "Unknown error")[-2500:],
+    )
 
 
 def _remove_original_create_rich_route() -> None:
@@ -30,17 +52,15 @@ _remove_original_create_rich_route()
     "/action/create-rich",
     operation_id="createRichHwpx",
     dependencies=[Depends(app_module.require_api_key)],
-    response_model=app_module.ActionEditResponse,
+    response_model=RichActionResponse,
+    response_model_exclude_none=True,
 )
 def action_create_rich_hwpx(
     payload: app_module.CreateRichHwpxRequest,
-) -> app_module.ActionEditResponse:
+) -> RichActionResponse:
     filename = payload.filename.strip()
     if Path(filename).name != filename or not filename.lower().endswith(".hwpx"):
-        raise HTTPException(
-            status_code=400,
-            detail="filename must be a plain .hwpx filename.",
-        )
+        return _failure("filename", "filename must be a plain .hwpx filename.")
 
     with tempfile.TemporaryDirectory(prefix="hwpx-action-rich-") as tmp:
         workdir = Path(tmp)
@@ -52,58 +72,63 @@ def action_create_rich_hwpx(
                 payload.markdown,
                 workdir,
             )
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=422,
-                detail={"message": "PNG chart rendering failed.", "error": str(exc)},
-            ) from exc
+        except Exception as exc:
+            return _failure("chart_rendering", f"{type(exc).__name__}: {exc}")
 
-        markdown_path.write_text(rendered_markdown, encoding="utf-8")
+        try:
+            markdown_path.write_text(rendered_markdown, encoding="utf-8")
+            command = [
+                "kordoc",
+                "generate",
+                str(markdown_path),
+                "-o",
+                str(output),
+                "--preset",
+                payload.preset,
+            ]
+            if png_chart_count:
+                command += ["--image-dir", str(workdir)]
 
-        command = [
-            "kordoc",
-            "generate",
-            str(markdown_path),
-            "-o",
-            str(output),
-            "--preset",
-            payload.preset,
-        ]
-        if png_chart_count:
-            command += ["--image-dir", str(workdir)]
+            proc = app_module.subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            return _failure("kordoc_timeout", "Kordoc generation exceeded 120 seconds.")
+        except Exception as exc:
+            return _failure("kordoc_launch", f"{type(exc).__name__}: {exc}")
 
-        proc = app_module.subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
         if proc.returncode != 0 or not output.is_file():
-            raise HTTPException(
-                status_code=422,
-                detail={
-                    "message": "Kordoc generation failed.",
-                    "stderr": proc.stderr[-4000:],
-                },
-            )
+            diagnostic = proc.stderr.strip() or proc.stdout.strip() or "Kordoc returned no diagnostic text."
+            return _failure("kordoc_generation", diagnostic)
 
-        app_module.add_hancom_compatibility_metadata(output)
+        try:
+            app_module.add_hancom_compatibility_metadata(output)
+        except Exception as exc:
+            return _failure("hancom_compatibility", f"{type(exc).__name__}: {exc}")
 
-        errors = app_module.validate_hwpx(str(output))
+        try:
+            errors = app_module.validate_hwpx(str(output))
+        except Exception as exc:
+            return _failure("validation_runtime", f"{type(exc).__name__}: {exc}")
+
         if errors:
-            raise HTTPException(
-                status_code=500,
-                detail={"output_validation_errors": errors},
-            )
+            return _failure("output_validation", "; ".join(str(item) for item in errors))
 
-        output_bytes = output.read_bytes()
+        try:
+            output_bytes = output.read_bytes()
+        except Exception as exc:
+            return _failure("output_read", f"{type(exc).__name__}: {exc}")
+
         if len(output_bytes) > app_module.ACTION_OUTPUT_MAX_FILE_BYTES:
-            raise HTTPException(
-                status_code=413,
-                detail="Created HWPX exceeds the 10 MB GPT Action returned-file limit.",
+            return _failure(
+                "output_size",
+                "Created HWPX exceeds the 10 MB GPT Action returned-file limit.",
             )
 
-        return app_module.ActionEditResponse(
+        return RichActionResponse(
             ok=True,
             validated=True,
             layout_warning_count=len(app_module.find_layout_warnings(output)),
