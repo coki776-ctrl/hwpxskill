@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: HWPX Skill API
-  version: 0.2.5
+  version: 0.2.6
   description: Inspect, search, validate, edit, and rebuild HWPX documents through GPT Actions.
 
 servers:
@@ -289,11 +289,11 @@ paths:
               $ref: "#/components/schemas/CreateRichHwpxRequest"
       responses:
         "200":
-          description: Rich HWPX returned as an OpenAI file response.
+          description: Rich HWPX returned through a short-lived download URL in openaiFileResponse.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EditResponse"
+                $ref: "#/components/schemas/RichResponse"
 
 components:
   schemas:
@@ -483,6 +483,21 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/OpenAIFile"
+      required: [ok, validated, layout_warning_count, openaiFileResponse]
+
+    RichResponse:
+      type: object
+      properties:
+        ok: {type: boolean}
+        validated: {type: boolean}
+        layout_warning_count: {type: integer}
+        openaiFileResponse:
+          type: array
+          items:
+            type: string
+            format: uri
+        error_stage: {type: [string, "null"]}
+        error_message: {type: [string, "null"]}
       required: [ok, validated, layout_warning_count, openaiFileResponse]
 
   securitySchemes:
