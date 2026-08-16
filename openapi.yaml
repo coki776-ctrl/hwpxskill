@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: HWPX Skill API
-  version: 0.2.4
+  version: 0.2.5
   description: Inspect, search, validate, edit, and rebuild HWPX documents through GPT Actions.
 
 servers:
@@ -24,7 +24,7 @@ paths:
     post:
       operationId: inspectHwpx
       summary: Inspect an uploaded HWPX and return only a very small structural summary.
-      description: Use this first to confirm the HWPX can be read. It intentionally does not return the full slot list. For locating text to edit, call findHwpxText.
+      description: Use this first to confirm the HWPX can be read. For rebuilding an attached HWPX, use inspectHwpxPage to read its text in pages.
       security:
         - bearerAuth: []
       requestBody:
@@ -52,6 +52,57 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/InspectSummaryResponse"
+
+  /action/inspect-page:
+    post:
+      operationId: inspectHwpxPage
+      summary: Read text from an uploaded HWPX in small paged chunks.
+      description: Read attached HWPX text for rebuilding. Start at offset 0 and repeat with next_offset until has_more is false, then call createRichHwpx with the reconstructed content.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [openaiFileIdRefs]
+              properties:
+                openaiFileIdRefs:
+                  type: array
+                  minItems: 1
+                  maxItems: 1
+                  items:
+                    $ref: "#/components/schemas/ActionFileRef"
+                  description: Exactly one user-uploaded .hwpx file from the current conversation.
+                include_empty_cells:
+                  type: boolean
+                  default: false
+                preview_len:
+                  type: integer
+                  default: 80
+                  minimum: 10
+                  maximum: 80
+                offset:
+                  type: integer
+                  default: 0
+                  minimum: 0
+                limit:
+                  type: integer
+                  default: 10
+                  minimum: 1
+                  maximum: 10
+                search_text:
+                  type: [string, "null"]
+                  maxLength: 200
+                  default: null
+      responses:
+        "200":
+          description: One page of HWPX text slots.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InspectPageResponse"
 
   /action/find:
     post:
@@ -227,7 +278,7 @@ paths:
     post:
       operationId: createRichHwpx
       summary: Create or rebuild a professionally formatted HWPX with headings, tables, emphasis, and embedded PNG charts.
-      description: Use for professional report generation or redesign. Use this even with an attached HWPX when adding charts/tables or improving visual hierarchy. Treat the attachment as a content source and rebuild. Include ```chart fences for PNG charts. Example values are allowed only when explicitly authorized.
+      description: Use for professional report generation or redesign. With an attached HWPX, read it via inspectHwpxPage first, then rebuild. Include ```chart fences for PNG charts. Example values are allowed only when explicitly authorized.
       security:
         - bearerAuth: []
       requestBody:
@@ -326,7 +377,10 @@ components:
           type: string
           minLength: 1
           description: Full Markdown document. May include tables and ```chart code fences for server-rendered PNG charts.
-        preset: {type: string, minLength: 1, maxLength: 40, default: 보고서}
+        preset:
+          type: string
+          enum: [보고서, 기안문, 계획서, 통지, 회의록, 개조식, 보도자료]
+          default: 보고서
       required: [markdown]
       additionalProperties: false
 
@@ -362,6 +416,23 @@ components:
         paragraph_slots: {type: integer}
         cell_slots: {type: integer}
       required: [ok, source, total_slots, paragraph_slots, cell_slots]
+
+    InspectPageResponse:
+      type: object
+      properties:
+        ok: {type: boolean}
+        source: {type: string}
+        matched_slots: {type: integer}
+        offset: {type: integer}
+        returned: {type: integer}
+        has_more: {type: boolean}
+        next_offset: {type: [integer, "null"]}
+        slots:
+          type: array
+          maxItems: 10
+          items:
+            $ref: "#/components/schemas/Slot"
+      required: [ok, source, matched_slots, offset, returned, has_more, slots]
 
     FindResponse:
       type: object
