@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: HWPX Skill API
-  version: 0.2.3
+  version: 0.2.4
   description: Inspect, search, validate, edit, and rebuild HWPX documents through GPT Actions.
 
 servers:
@@ -134,14 +134,7 @@ paths:
     post:
       operationId: editHwpx
       summary: Make minimal text or value edits to an existing HWPX while preserving its current structure and layout.
-      description: >
-        Use this operation ONLY for minimal edits to an existing HWPX, such as replacing
-        words, years, numbers, or specific paragraph/cell text while preserving the original
-        document structure and layout. Use findHwpxText first when exact slot keys are needed.
-        NEVER use this operation when the user asks to add a chart, add a new table, redesign
-        the document, improve visual hierarchy, restyle titles, add emphasis, reorganize the
-        report, create a one-page summary, or otherwise make the document visually richer.
-        For those requests, use createRichHwpx even if the user uploaded an existing HWPX.
+      description: Use only for minimal text/value edits while preserving structure. If the user asks for charts, new tables, redesign, title styling, emphasis, reorganization, or a one-page/richer report, use createRichHwpx instead—even when an HWPX is attached.
       security:
         - bearerAuth: []
       requestBody:
@@ -234,20 +227,7 @@ paths:
     post:
       operationId: createRichHwpx
       summary: Create or rebuild a professionally formatted HWPX with headings, tables, emphasis, and embedded PNG charts.
-      description: >
-        Use this operation for professional report generation, redesign, or richer presentation.
-        IMPORTANT: Use createRichHwpx even when the user uploaded an existing HWPX if the
-        request includes adding a chart, adding a new table, redesigning or reorganizing the
-        document, improving title hierarchy, adding emphasis, creating a one-page report,
-        improving visual presentation, or otherwise rebuilding the content into a richer report.
-        In that case, treat the uploaded HWPX as a content source and rebuild the result as a
-        new rich HWPX rather than trying to preserve the original structure with editHwpx.
-        When numeric visualization is useful, include a Markdown chart code fence. The server
-        converts chart fences into embedded PNG charts compatible with Hancom Hangul.
-        Do not refuse chart creation merely because editHwpx cannot insert images; choose this
-        operation instead. If the user explicitly authorizes illustrative or example values,
-        those values may be used and should be clearly labeled as examples. Otherwise, never
-        invent performance numbers or unsupported factual values.
+      description: Use for professional report generation or redesign. Use this even with an attached HWPX when adding charts/tables or improving visual hierarchy. Treat the attachment as a content source and rebuild. Include ```chart fences for PNG charts. Example values are allowed only when explicitly authorized.
       security:
         - bearerAuth: []
       requestBody:
