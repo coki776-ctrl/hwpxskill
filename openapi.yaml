@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: HWPX Skill API
-  version: 0.2.2
-  description: Inspect, search, validate, and edit HWPX documents through GPT Actions while preserving their original structure.
+  version: 0.2.3
+  description: Inspect, search, validate, edit, and rebuild HWPX documents through GPT Actions.
 
 servers:
   - url: https://hwpxskill-api.onrender.com
@@ -133,8 +133,15 @@ paths:
   /action/edit:
     post:
       operationId: editHwpx
-      summary: Edit an uploaded HWPX and return the edited HWPX file.
-      description: Use findHwpxText first when exact slot keys are needed. Send only the edits requested by the user. Preserve the document structure and layout safeguards.
+      summary: Make minimal text or value edits to an existing HWPX while preserving its current structure and layout.
+      description: >
+        Use this operation ONLY for minimal edits to an existing HWPX, such as replacing
+        words, years, numbers, or specific paragraph/cell text while preserving the original
+        document structure and layout. Use findHwpxText first when exact slot keys are needed.
+        NEVER use this operation when the user asks to add a chart, add a new table, redesign
+        the document, improve visual hierarchy, restyle titles, add emphasis, reorganize the
+        report, create a one-page summary, or otherwise make the document visually richer.
+        For those requests, use createRichHwpx even if the user uploaded an existing HWPX.
       security:
         - bearerAuth: []
       requestBody:
@@ -185,6 +192,7 @@ paths:
     post:
       operationId: createHwpxFromTemplate
       summary: Create a new HWPX using an uploaded HWPX as the formatting template.
+      description: Use this only when the user explicitly wants to preserve and reuse the uploaded HWPX formatting as the template for a new document. If the user instead asks for redesign, richer presentation, new charts, new tables, or visual restructuring, use createRichHwpx.
       security:
         - bearerAuth: []
       requestBody:
@@ -204,7 +212,8 @@ paths:
   /action/create:
     post:
       operationId: createHwpx
-      summary: Create a new HWPX from the server blank template.
+      summary: Create a very simple new HWPX from the server blank template.
+      description: Use only for simple title-and-paragraph documents that do not need tables, charts, richer hierarchy, or report redesign. For professional reports or visually structured documents, use createRichHwpx.
       security:
         - bearerAuth: []
       requestBody:
@@ -224,7 +233,21 @@ paths:
   /action/create-rich:
     post:
       operationId: createRichHwpx
-      summary: Create a rich HWPX from Markdown using Kordoc and Hancom compatibility metadata.
+      summary: Create or rebuild a professionally formatted HWPX with headings, tables, emphasis, and embedded PNG charts.
+      description: >
+        Use this operation for professional report generation, redesign, or richer presentation.
+        IMPORTANT: Use createRichHwpx even when the user uploaded an existing HWPX if the
+        request includes adding a chart, adding a new table, redesigning or reorganizing the
+        document, improving title hierarchy, adding emphasis, creating a one-page report,
+        improving visual presentation, or otherwise rebuilding the content into a richer report.
+        In that case, treat the uploaded HWPX as a content source and rebuild the result as a
+        new rich HWPX rather than trying to preserve the original structure with editHwpx.
+        When numeric visualization is useful, include a Markdown chart code fence. The server
+        converts chart fences into embedded PNG charts compatible with Hancom Hangul.
+        Do not refuse chart creation merely because editHwpx cannot insert images; choose this
+        operation instead. If the user explicitly authorizes illustrative or example values,
+        those values may be used and should be clearly labeled as examples. Otherwise, never
+        invent performance numbers or unsupported factual values.
       security:
         - bearerAuth: []
       requestBody:
@@ -316,9 +339,13 @@ components:
 
     CreateRichHwpxRequest:
       type: object
+      description: Markdown for a new or rebuilt rich HWPX. For charts, include a ```chart code fence in markdown; the server converts it to an embedded PNG image.
       properties:
         filename: {type: string, minLength: 6, default: report.hwpx}
-        markdown: {type: string, minLength: 1}
+        markdown:
+          type: string
+          minLength: 1
+          description: Full Markdown document. May include tables and ```chart code fences for server-rendered PNG charts.
         preset: {type: string, minLength: 1, maxLength: 40, default: 보고서}
       required: [markdown]
       additionalProperties: false
@@ -411,4 +438,3 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-
