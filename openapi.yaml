@@ -221,6 +221,26 @@ paths:
               schema:
                 $ref: "#/components/schemas/EditResponse"
 
+  /action/create-rich:
+    post:
+      operationId: createRichHwpx
+      summary: Create a rich HWPX from Markdown using Kordoc and Hancom compatibility metadata.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRichHwpxRequest"
+      responses:
+        "200":
+          description: Rich HWPX returned as an OpenAI file response.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EditResponse"
+
 components:
   schemas:
     ActionFileRef:
@@ -292,6 +312,15 @@ components:
           minLength: 6
           default: created.hwpx
       required: [title, paragraphs]
+      additionalProperties: false
+
+    CreateRichHwpxRequest:
+      type: object
+      properties:
+        filename: {type: string, minLength: 6, default: report.hwpx}
+        markdown: {type: string, minLength: 1}
+        preset: {type: string, minLength: 1, maxLength: 40, default: 보고서}
+      required: [markdown]
       additionalProperties: false
 
     HealthResponse:

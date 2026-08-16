@@ -12,16 +12,20 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Annotated
+from zipfile import ZIP_STORED, ZipFile
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.background import BackgroundTasks
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
+from lxml import etree
 
 ROOT = Path(__file__).resolve().parent
 SCRIPTS = ROOT / "scripts"
 BLANK_TEMPLATE = ROOT / "templates" / "blank_template.hwpx"
+COMPAT_VERSION = ROOT / "templates" / "base" / "version.xml"
+COMPAT_SETTINGS = ROOT / "templates" / "base" / "settings.xml"
 sys.path.insert(0, str(SCRIPTS))
 
 from finalize_hwpx import find_layout_warnings  # noqa: E402
@@ -114,6 +118,14 @@ class CreateHwpxRequest(BaseModel):
     title: str = Field(min_length=1)
     paragraphs: list[str] = Field(min_length=1, max_length=30)
     output_filename: str = Field(default="created.hwpx", min_length=6)
+
+
+class CreateRichHwpxRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    filename: str = Field(default="report.hwpx", min_length=6)
+    markdown: str = Field(min_length=1)
+    preset: str = Field(default="보고서", min_length=1, max_length=40)
 
 
 def require_api_key(
@@ -534,5 +546,70 @@ def action_create_hwpx(payload: CreateHwpxRequest) -> ActionEditResponse:
                 name=output_filename, mime_type="application/hwp+zip",
                 content=base64.b64encode(output_bytes).decode("ascii"),
             )],
+        )
+
+
+def add_hancom_compatibility_metadata(path: Path) -> None:
+    if not COMPAT_VERSION.is_file() or not COMPAT_SETTINGS.is_file():
+        raise HTTPException(status_code=500, detail="Server Hancom compatibility metadata is missing.")
+    with ZipFile(path, "r") as source:
+        entries = [(info, source.read(info.filename)) for info in source.infolist()]
+    content_index = next((i for i, (info, _) in enumerate(entries) if info.filename == "Contents/content.hpf"), None)
+    if content_index is None:
+        raise HTTPException(status_code=422, detail="Kordoc output is missing Contents/content.hpf.")
+    root = etree.fromstring(entries[content_index][1])
+    ns = {"opf": "http://www.idpf.org/2007/opf/"}
+    manifest = root.find("opf:manifest", ns)
+    if manifest is None:
+        raise HTTPException(status_code=422, detail="Kordoc output manifest is missing.")
+    if not manifest.xpath('./opf:item[@href="settings.xml"]', namespaces=ns):
+        etree.SubElement(manifest, "{http://www.idpf.org/2007/opf/}item", id="settings", href="settings.xml", **{"media-type": "application/xml"})
+    entries[content_index] = (entries[content_index][0], etree.tostring(root, xml_declaration=True, encoding="UTF-8"))
+    replacements = {"version.xml": COMPAT_VERSION.read_bytes(), "settings.xml": COMPAT_SETTINGS.read_bytes()}
+    temp = path.with_suffix(".compat.hwpx")
+    with ZipFile(temp, "w") as target:
+        written = set()
+        for info, data in entries:
+            if info.filename in replacements:
+                data = replacements[info.filename]
+            target.writestr(info, data)
+            written.add(info.filename)
+        for name, data in replacements.items():
+            if name not in written:
+                target.writestr(name, data)
+    temp.replace(path)
+
+
+@app.post(
+    "/action/create-rich",
+    operation_id="createRichHwpx",
+    dependencies=[Depends(require_api_key)],
+    response_model=ActionEditResponse,
+)
+def action_create_rich_hwpx(payload: CreateRichHwpxRequest) -> ActionEditResponse:
+    filename = payload.filename.strip()
+    if Path(filename).name != filename or not filename.lower().endswith(".hwpx"):
+        raise HTTPException(status_code=400, detail="filename must be a plain .hwpx filename.")
+    with tempfile.TemporaryDirectory(prefix="hwpx-action-rich-") as tmp:
+        workdir = Path(tmp)
+        markdown_path = workdir / "input.md"
+        output = workdir / "output.hwpx"
+        markdown_path.write_text(payload.markdown, encoding="utf-8")
+        proc = subprocess.run(
+            ["kordoc", "generate", str(markdown_path), "-o", str(output), "--preset", payload.preset],
+            capture_output=True, text=True, timeout=120,
+        )
+        if proc.returncode != 0 or not output.is_file():
+            raise HTTPException(status_code=422, detail={"message": "Kordoc generation failed.", "stderr": proc.stderr[-4000:]})
+        add_hancom_compatibility_metadata(output)
+        errors = validate_hwpx(str(output))
+        if errors:
+            raise HTTPException(status_code=500, detail={"output_validation_errors": errors})
+        output_bytes = output.read_bytes()
+        if len(output_bytes) > ACTION_OUTPUT_MAX_FILE_BYTES:
+            raise HTTPException(status_code=413, detail="Created HWPX exceeds the 10 MB GPT Action returned-file limit.")
+        return ActionEditResponse(
+            ok=True, validated=True, layout_warning_count=len(find_layout_warnings(output)),
+            openaiFileResponse=[ActionOutputFile(name=filename, mime_type="application/hwp+zip", content=base64.b64encode(output_bytes).decode("ascii"))],
         )
 

@@ -3,6 +3,7 @@ import json
 import sys
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -26,7 +27,7 @@ def _write_hwpx(
         cells = "".join(
             '<hp:tc><hp:cellAddr rowAddr="0" colAddr="0"/>'
             f'<hp:subList><hp:p id="{100 + index}" paraPrIDRef="0" styleIDRef="0">'
-            f'<hp:run charPrIDRef="0"><hp:t>以묐났? 湲곗〈蹂몃Ц {index}</hp:t></hp:run>'
+            f'<hp:run charPrIDRef="0"><hp:t>중복셀 기존본문 {index}</hp:t></hp:run>'
             '</hp:p></hp:subList></hp:tc>'
             for index in range(2)
         )
@@ -99,11 +100,11 @@ def test_find_returns_at_most_ten_slots(monkeypatch, tmp_path):
 
 def test_action_edit_applies_eight_slot_edits_and_preserves_structure(monkeypatch, tmp_path):
     source = tmp_path / "source.hwpx"
-    _write_hwpx(source, paragraphs=8, needle="2026?숇뀈??)
+    _write_hwpx(source, paragraphs=8, needle="2026학년도")
     monkeypatch.setattr(app_module, "download_action_hwpx", lambda _ref, dst: dst.write_bytes(source.read_bytes()))
 
     payload = _payload(slot_edits=[
-        {"slot_key": f"p:{index}", "new_text": f"2027?숇뀈??paragraph {index}"}
+        {"slot_key": f"p:{index}", "new_text": f"2027학년도 paragraph {index}"}
         for index in range(8)
     ])
     response = TestClient(action_ext.app).post("/action/edit", json=payload)
@@ -117,28 +118,28 @@ def test_action_edit_applies_eight_slot_edits_and_preserves_structure(monkeypatc
     assert app_module.structure_errors(source, output) == []
     profile = app_module.collect_slots(output, include_empty_cells=False)
     assert len(profile["slots"]) == 8
-    assert all("2027?숇뀈?? in slot["preview"] for slot in profile["slots"])
-    assert all("2026?숇뀈?? not in slot["preview"] for slot in profile["slots"])
+    assert all("2027학년도" in slot["preview"] for slot in profile["slots"])
+    assert all("2026학년도" not in slot["preview"] for slot in profile["slots"])
 
 
 def test_create_from_template_replaces_body_and_returns_valid_hwpx(monkeypatch, tmp_path):
     source = tmp_path / "template.hwpx"
-    _write_hwpx(source, paragraphs=6, needle="湲곗〈蹂몃Ц")
+    _write_hwpx(source, paragraphs=6, needle="기존본문")
     monkeypatch.setattr(app_module, "download_action_hwpx", lambda _ref, dst: dst.write_bytes(source.read_bytes()))
-    expected = ["??臾몄꽌 ?쒕ぉ", "泥?踰덉㎏ ?댁슜", "??踰덉㎏ ?댁슜", "??踰덉㎏ ?댁슜"]
+    expected = ["새 문서 제목", "첫 번째 내용", "두 번째 내용", "세 번째 내용"]
 
     response = TestClient(action_ext.app).post(
         "/action/create-from-template",
         json=_payload(
             title=expected[0],
             paragraphs=expected[1:],
-            output_filename="?덈Ц??hwpx",
+            output_filename="새문서.hwpx",
         ),
     )
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["validated"] is True
-    assert body["openaiFileResponse"][0]["name"] == "?덈Ц??hwpx"
+    assert body["openaiFileResponse"][0]["name"] == "새문서.hwpx"
 
     output = tmp_path / "created.hwpx"
     output.write_bytes(base64.b64decode(body["openaiFileResponse"][0]["content"]))
@@ -148,20 +149,20 @@ def test_create_from_template_replaces_body_and_returns_valid_hwpx(monkeypatch, 
     assert [slot["preview"] for slot in profile["slots"]] == expected
     with zipfile.ZipFile(output) as archive:
         section = archive.read("Contents/section0.xml").decode("utf-8")
-    assert "湲곗〈蹂몃Ц" not in section
+    assert "기존본문" not in section
 
 
 def test_create_from_template_ignores_duplicate_coordinate_cell_slots(monkeypatch, tmp_path):
     source = tmp_path / "duplicate-cells.hwpx"
-    _write_hwpx(source, paragraphs=5, needle="湲곗〈蹂몃Ц", duplicate_cells=True)
+    _write_hwpx(source, paragraphs=5, needle="기존본문", duplicate_cells=True)
     profile = app_module.collect_slots(source, include_empty_cells=True)
     assert any(slot["kind"] == "cell" and slot.get("occurrence") == 1 for slot in profile["slots"])
     monkeypatch.setattr(app_module, "download_action_hwpx", lambda _ref, dst: dst.write_bytes(source.read_bytes()))
-    expected = ["???쒕ぉ", "泥??댁슜", "?섏㎏ ?댁슜"]
+    expected = ["새 제목", "첫 내용", "둘째 내용"]
 
     response = TestClient(action_ext.app).post(
         "/action/create-from-template",
-        json=_payload(title=expected[0], paragraphs=expected[1:], output_filename="以묐났?_?앹꽦.hwpx"),
+        json=_payload(title=expected[0], paragraphs=expected[1:], output_filename="중복셀_생성.hwpx"),
     )
     assert response.status_code == 200, response.text
     output = tmp_path / "created.hwpx"
@@ -173,23 +174,23 @@ def test_create_from_template_ignores_duplicate_coordinate_cell_slots(monkeypatc
     assert previews == expected
     with zipfile.ZipFile(output) as archive:
         section = archive.read("Contents/section0.xml").decode("utf-8")
-    assert "湲곗〈蹂몃Ц" not in section
+    assert "기존본문" not in section
     assert all(text in section for text in expected)
 
 
 def test_create_without_attachment_uses_server_blank_template(tmp_path):
-    expected = ["?쒕쾭 ?쒗뵆由??쒕ぉ", "蹂몃Ц ?섎굹", "蹂몃Ц ??]
+    expected = ["서버 템플릿 제목", "본문 하나", "본문 둘"]
     response = TestClient(action_ext.app).post(
         "/action/create",
         json={
             "title": expected[0],
             "paragraphs": expected[1:],
-            "output_filename": "寃곌낵.hwpx",
+            "output_filename": "결과.hwpx",
         },
     )
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["openaiFileResponse"][0]["name"] == "寃곌낵.hwpx"
+    assert body["openaiFileResponse"][0]["name"] == "결과.hwpx"
     output = tmp_path / "created.hwpx"
     output.write_bytes(base64.b64decode(body["openaiFileResponse"][0]["content"]))
     assert app_module.validate_hwpx(str(output)) == []
@@ -201,6 +202,29 @@ def test_create_without_attachment_uses_server_blank_template(tmp_path):
     assert "BODY_PLACEHOLDER" not in section
     profile = app_module.collect_slots(output, include_empty_cells=False)
     assert [slot["preview"] for slot in profile["slots"]] == expected
+
+
+def test_create_rich_adds_hancom_compatibility_metadata(monkeypatch, tmp_path):
+    def fake_run(command, **_kwargs):
+        output = Path(command[command.index("-o") + 1])
+        _write_hwpx(output, paragraphs=4, needle="Kordoc rich content")
+        return SimpleNamespace(returncode=0, stderr="", stdout="")
+
+    monkeypatch.setattr(app_module.subprocess, "run", fake_run)
+    markdown = "# 제목\n\n본문\n\n- 목록\n\n| 항목 | 값 |\n|---|---|\n| A | 1 |\n\n```chart\ntype: column\ncat: 2024, 2025\n불용액: 2662, 1185\n```"
+    response = TestClient(action_ext.app).post(
+        "/action/create-rich",
+        json={"filename": "rich.hwpx", "markdown": markdown, "preset": "보고서"},
+    )
+    assert response.status_code == 200, response.text
+    output = tmp_path / "rich.hwpx"
+    output.write_bytes(base64.b64decode(response.json()["openaiFileResponse"][0]["content"]))
+    assert app_module.validate_hwpx(str(output)) == []
+    with zipfile.ZipFile(output) as archive:
+        assert archive.read("version.xml") == app_module.COMPAT_VERSION.read_bytes()
+        assert archive.read("settings.xml") == app_module.COMPAT_SETTINGS.read_bytes()
+        manifest = archive.read("Contents/content.hpf").decode("utf-8")
+    assert 'href="settings.xml"' in manifest
 
 
 def test_deployed_app_routes_and_operation_ids_are_unique():
@@ -217,6 +241,7 @@ def test_deployed_app_routes_and_operation_ids_are_unique():
     assert routes[("/action/edit", "POST")] == "editHwpx"
     assert routes[("/action/create-from-template", "POST")] == "createHwpxFromTemplate"
     assert routes[("/action/create", "POST")] == "createHwpx"
+    assert routes[("/action/create-rich", "POST")] == "createRichHwpx"
     operation_ids = [value for value in routes.values() if value]
     assert len(operation_ids) == len(set(operation_ids))
 
@@ -284,4 +309,10 @@ def test_committed_openapi_matches_action_request_and_response_shapes():
     assert set(blank_schema["properties"]) == set(
         app_module.CreateHwpxRequest.model_json_schema()["properties"]
     )
+    rich = spec["paths"]["/action/create-rich"]["post"]
+    assert rich["operationId"] == "createRichHwpx"
+    rich_route = next(route for route in action_ext.app.routes if getattr(route, "path", None) == "/action/create-rich")
+    assert rich_route.operation_id == "createRichHwpx"
+    assert rich_route.body_field.type_ is app_module.CreateRichHwpxRequest
+    assert rich_route.response_model is app_module.ActionEditResponse
 
