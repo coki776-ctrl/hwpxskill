@@ -86,12 +86,21 @@ def _load_hwpx(refs: list[ActionFileRef]):
     ref = select_action_hwpx(refs)
     temp = tempfile.TemporaryDirectory(prefix="hwpx-action-inspect-")
     src = Path(temp.name) / "input.hwpx"
-    download_action_hwpx(ref, src)
-    errors = validate_hwpx(str(src))
-    if errors:
+    try:
+        download_action_hwpx(ref, src)
+        errors = validate_hwpx(str(src))
+        if errors:
+            raise HTTPException(status_code=422, detail={"validation_errors": errors})
+        return ref, src, temp
+    except Exception:
         temp.cleanup()
-        raise HTTPException(status_code=422, detail={"validation_errors": errors})
-    return ref, src, temp
+        raise
+
+
+def _error_text(exc: Exception) -> str:
+    if isinstance(exc, HTTPException):
+        return f"HTTP {exc.status_code}: {exc.detail}"
+    return f"{type(exc).__name__}: {exc}"
 
 
 @app.post(
@@ -150,7 +159,23 @@ def action_find_hwpx_text(payload: ActionFindRequest) -> FindResponse:
     dependencies=[Depends(require_api_key)],
 )
 def action_inspect_hwpx_page(payload: ActionInspectPageRequest) -> dict:
-    ref, src, temp = _load_hwpx(payload.openaiFileIdRefs)
+    source = payload.openaiFileIdRefs[0].name if payload.openaiFileIdRefs else ""
+    try:
+        ref, src, temp = _load_hwpx(payload.openaiFileIdRefs)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "source": source,
+            "matched_slots": 0,
+            "offset": payload.offset,
+            "returned": 0,
+            "has_more": False,
+            "next_offset": None,
+            "slots": [],
+            "error_stage": "load_uploaded_hwpx",
+            "error_message": _error_text(exc)[:2000],
+        }
+
     try:
         all_slots = list(iter_slots(src, payload.preview_len, payload.include_empty_cells))
         filtered = all_slots
@@ -174,6 +199,18 @@ def action_inspect_hwpx_page(payload: ActionInspectPageRequest) -> dict:
             "next_offset": end if end < len(filtered) else None,
             "slots": [_compact_slot(slot) for slot in page],
         }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "source": ref.name,
+            "matched_slots": 0,
+            "offset": payload.offset,
+            "returned": 0,
+            "has_more": False,
+            "next_offset": None,
+            "slots": [],
+            "error_stage": "read_hwpx_text",
+            "error_message": _error_text(exc)[:2000],
+        }
     finally:
         temp.cleanup()
-
