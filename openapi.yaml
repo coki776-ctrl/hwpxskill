@@ -189,7 +189,7 @@ paths:
     post:
       operationId: createRichHwpx
       summary: Create a professional HWPX with tables and PNG charts.
-      description: Builds and validates the HWPX, then returns a temporary download URL through openaiFileResponse.
+      description: Builds and validates the HWPX. Present download_url directly to the user as a clickable link; do not fetch it through an Action.
       security:
         - bearerAuth: []
       requestBody:
@@ -453,14 +453,14 @@ components:
         ok: {type: boolean}
         validated: {type: boolean}
         layout_warning_count: {type: integer}
-        openaiFileResponse:
-          type: array
-          items:
-            type: string
-            format: uri
+        filename: {type: [string, "null"]}
+        download_url:
+          type: [string, "null"]
+          format: uri
+          description: Present this URL directly to the user as a clickable link.
         error_stage: {type: [string, "null"]}
         error_message: {type: [string, "null"]}
-      required: [ok, validated, layout_warning_count, openaiFileResponse]
+      required: [ok, validated, layout_warning_count]
 
   securitySchemes:
     bearerAuth:

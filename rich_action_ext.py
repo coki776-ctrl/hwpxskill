@@ -36,7 +36,8 @@ class RichActionResponse(BaseModel):
     ok: bool
     validated: bool
     layout_warning_count: int = 0
-    openaiFileResponse: list[str] = Field(default_factory=list)
+    filename: str | None = None
+    download_url: str | None = None
     error_stage: str | None = None
     error_message: str | None = None
 
@@ -65,7 +66,6 @@ def _failure(stage: str, message: str) -> RichActionResponse:
         ok=False,
         validated=False,
         layout_warning_count=0,
-        openaiFileResponse=[],
         error_stage=stage,
         error_message=(message or "Unknown error")[-2500:],
     )
@@ -458,5 +458,6 @@ def action_create_rich_hwpx(
             ok=True,
             validated=True,
             layout_warning_count=warnings,
-            openaiFileResponse=[file_url],
+            filename=filename,
+            download_url=file_url,
         )
