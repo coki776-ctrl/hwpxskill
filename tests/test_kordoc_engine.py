@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import kordoc_engine
 
 
-def test_generate_hwpx_builds_kordoc_command(monkeypatch, tmp_path: Path):
+def test_generate_hwpx_builds_bridge_command(monkeypatch, tmp_path: Path):
     md = tmp_path / "input.md"
     out = tmp_path / "output.hwpx"
     md.write_text("# 테스트\n\n![차트](chart_1.png)", encoding="utf-8")
@@ -18,26 +18,20 @@ def test_generate_hwpx_builds_kordoc_command(monkeypatch, tmp_path: Path):
 
     monkeypatch.setattr(kordoc_engine.subprocess, "run", fake_run)
 
-    result = kordoc_engine.generate_hwpx(
-        md,
-        out,
-        preset="보고서",
-    )
+    result = kordoc_engine.generate_hwpx(md, out, preset="보고서")
 
     assert result.ok is True
     assert captured["command"] == [
-        "kordoc",
-        "generate",
+        "node",
+        str(Path(kordoc_engine.__file__).with_name("kordoc_bridge.mjs")),
         str(md),
-        "-o",
         str(out),
-        "--preset",
         "보고서",
+        "chart_1.png",
     ]
-    assert "--image-dir" not in captured["command"]
 
 
-def test_generate_hwpx_reports_cli_failure(monkeypatch, tmp_path: Path):
+def test_generate_hwpx_reports_bridge_failure(monkeypatch, tmp_path: Path):
     md = tmp_path / "input.md"
     out = tmp_path / "output.hwpx"
     md.write_text("# 실패 테스트", encoding="utf-8")
