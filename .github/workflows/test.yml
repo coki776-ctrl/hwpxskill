@@ -42,3 +42,21 @@ jobs:
 
       - name: Run Kordoc migration tests
         run: pytest -q tests/test_kordoc_engine.py tests/test_rich_charts.py
+
+      - name: Real Kordoc HWPX smoke test
+        run: |
+          mkdir -p /tmp/kordoc-smoke
+          printf '# 테스트\n\nKordoc 실제 HWPX 생성 확인용 문서입니다.\n' > /tmp/kordoc-smoke/input.md
+          kordoc generate /tmp/kordoc-smoke/input.md -o /tmp/kordoc-smoke/output.hwpx --preset 보고서
+          test -s /tmp/kordoc-smoke/output.hwpx
+          python - <<'PY'
+          import zipfile
+          from pathlib import Path
+          p = Path('/tmp/kordoc-smoke/output.hwpx')
+          assert p.stat().st_size > 0
+          with zipfile.ZipFile(p) as z:
+              names = set(z.namelist())
+              assert 'Contents/section0.xml' in names
+              assert 'Contents/content.hpf' in names
+          print(f'real Kordoc smoke OK: {p.stat().st_size} bytes')
+          PY
