@@ -29,7 +29,7 @@ jobs:
       - name: Unit tests
         run: |
           python -m py_compile kordoc_engine.py rich_action_kordoc.py rich_action_ext.py rich_charts.py document_plan.py track_c_eval.py
-          pytest -q tests/test_kordoc_engine.py tests/test_rich_charts.py tests/test_document_plan.py tests/test_track_c_eval.py tests/test_document_plan_e2e.py
+          pytest -q tests/test_kordoc_engine.py tests/test_rich_charts.py tests/test_document_plan.py tests/test_track_c_eval.py tests/test_document_plan_e2e.py tests/test_track_c_consistency_probe.py
       - name: Long report regression
         run: |
           mkdir -p /tmp/kordoc-long
