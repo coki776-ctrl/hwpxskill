@@ -108,8 +108,9 @@ jobs:
           assert (workdir / 'chart_1.png').is_file()
           (workdir / 'input.md').write_text(rendered, encoding='utf-8')
           PY
-          kordoc generate /tmp/kordoc-chart/input.md -o /tmp/kordoc-chart/output.hwpx --preset 보고서 --image-dir /tmp/kordoc-chart
-          test -s /tmp/kordoc-chart/output.hwpx
+          cd /tmp/kordoc-chart
+          kordoc generate input.md -o output.hwpx --preset 보고서
+          test -s output.hwpx
           python - <<'PY'
           import zipfile
           from pathlib import Path
