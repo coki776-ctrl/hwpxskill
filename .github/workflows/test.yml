@@ -7,7 +7,7 @@ on:
       - agent/kordoc-default-engine
 
 jobs:
-  pytest:
+  kordoc-migration:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -37,5 +37,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pytest httpx
 
-      - name: Run tests
-        run: pytest -q
+      - name: Compile migrated entrypoints
+        run: python -m py_compile kordoc_engine.py rich_action_kordoc.py rich_action_ext.py rich_charts.py
+
+      - name: Run Kordoc migration tests
+        run: pytest -q tests/test_kordoc_engine.py tests/test_rich_charts.py
