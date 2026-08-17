@@ -40,6 +40,38 @@ def test_generate_hwpx_builds_kordoc_command(monkeypatch, tmp_path: Path):
     ]
 
 
+def test_generate_hwpx_reports_cli_failure(monkeypatch, tmp_path: Path):
+    md = tmp_path / "input.md"
+    out = tmp_path / "output.hwpx"
+    md.write_text("# 실패 테스트", encoding="utf-8")
+
+    def fake_run(command, **kwargs):
+        return SimpleNamespace(returncode=2, stdout="", stderr="bad preset")
+
+    monkeypatch.setattr(kordoc_engine.subprocess, "run", fake_run)
+
+    result = kordoc_engine.generate_hwpx(md, out, preset="보고서")
+
+    assert result.ok is False
+    assert result.returncode == 2
+    assert "bad preset" in result.diagnostic
+
+
+def test_generate_hwpx_requires_output_file(monkeypatch, tmp_path: Path):
+    md = tmp_path / "input.md"
+    out = tmp_path / "output.hwpx"
+    md.write_text("# 출력 없음", encoding="utf-8")
+
+    def fake_run(command, **kwargs):
+        return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(kordoc_engine.subprocess, "run", fake_run)
+
+    result = kordoc_engine.generate_hwpx(md, out, preset="보고서")
+
+    assert result.ok is False
+
+
 def test_kordoc_version_raises_on_failure(monkeypatch):
     def fake_run(command, **kwargs):
         return SimpleNamespace(returncode=1, stdout="", stderr="not installed")
