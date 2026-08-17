@@ -1,5 +1,3 @@
-from fastapi import Depends
-
 import app as app_module
 from rich_action_kordoc import app
 
@@ -21,27 +19,18 @@ _remove_create_rich_route()
 @app.post(
     "/action/create-rich",
     operation_id="createRichHwpx",
-    dependencies=[Depends(app_module.require_api_key)],
 )
 def create_rich_transport_stub(
     payload: app_module.CreateRichHwpxRequest,
 ) -> dict[str, bool | int]:
-    """Temporary diagnostic stub matching the committed OpenAPI response shape.
+    """Temporary transport diagnostic with no auth or document work.
 
-    Deliberately performs no Kordoc, HWPX, chart, file, or subprocess work.
+    Deliberately performs no API-key validation, Kordoc, HWPX, chart,
+    file, or subprocess work. It only parses the JSON body and returns
+    the response shape already declared in the committed OpenAPI schema.
     """
     return {
         "ok": True,
         "validated": False,
         "layout_warning_count": 0,
     }
-
-
-@app.post(
-    "/action/transport-probe",
-    operation_id="probeActionTransport",
-    dependencies=[Depends(app_module.require_api_key)],
-)
-def probe_action_transport() -> dict[str, bool]:
-    """Minimal authenticated endpoint for isolating GPT Action transport issues."""
-    return {"ok": True}
