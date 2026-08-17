@@ -1,0 +1,47 @@
+[
+  {
+    "case_id": "policy_improvement",
+    "title": "지원 방식 개선 보고서",
+    "prompt": "현행 지원 방식과 개선안을 비교하고 핵심 성과지표와 비교 차트를 포함한 보고서로 정리한다.",
+    "source_text": "기존에는 분기별 신청이었다. 개선 후 월별 신청으로 전환한다. 2024년 불용액 2400, 2025년 1200. 불용액은 50.0% 감소했다.",
+    "required_terms": ["분기별", "월별", "불용액"],
+    "required_numbers": ["2400", "1200", "50.0%"],
+    "expectations": {"min_headings": 2, "min_tables": 1, "min_charts": 1, "min_lists": 0}
+  },
+  {
+    "case_id": "budget_execution",
+    "title": "예산 집행 분석",
+    "prompt": "연도별 집행률 변화를 요약하고 원인과 관리 포인트를 표와 차트로 보여준다.",
+    "source_text": "2024년 집행률 94.8%, 2025년 집행률 95.6%. 이월률은 4.3%에서 3.1%로 감소했다.",
+    "required_terms": ["집행률", "이월률"],
+    "required_numbers": ["94.8%", "95.6%", "4.3%", "3.1%"],
+    "expectations": {"min_headings": 2, "min_tables": 1, "min_charts": 1, "min_lists": 1}
+  },
+  {
+    "case_id": "facility_status",
+    "title": "시설사업 추진현황",
+    "prompt": "사업별 진행상황과 위험요인을 간결하게 정리하고 관리가 필요한 항목을 강조한다.",
+    "source_text": "A사업 공정률 80%, B사업 공정률 55%, C사업 공정률 30%. B사업은 설계변경, C사업은 인허가 지연이 주요 위험이다.",
+    "required_terms": ["A사업", "B사업", "C사업", "설계변경", "인허가 지연"],
+    "required_numbers": ["80%", "55%", "30%"],
+    "expectations": {"min_headings": 2, "min_tables": 1, "min_charts": 1, "min_lists": 1}
+  },
+  {
+    "case_id": "activity_cost",
+    "title": "교육활동비 분석",
+    "prompt": "학교급별 교육활동비 비율을 비교하고 취약구간을 강조하는 분석 보고서를 만든다.",
+    "source_text": "중학교 8.2%, 고등학교 9.1%, 특수학교 10.4%. 전체 평균은 8.9%다.",
+    "required_terms": ["중학교", "고등학교", "특수학교", "전체 평균"],
+    "required_numbers": ["8.2%", "9.1%", "10.4%", "8.9%"],
+    "expectations": {"min_headings": 2, "min_tables": 1, "min_charts": 1, "min_lists": 0}
+  },
+  {
+    "case_id": "meeting_action",
+    "title": "회의 결과 및 후속조치",
+    "prompt": "회의에서 확정된 결정사항과 후속조치를 담당별로 정리한다. 차트는 필요 없다.",
+    "source_text": "결정사항: 신청서식 단일화. 후속조치: 재무팀은 9월 5일까지 서식 배포, 인사팀은 9월 12일까지 의견 취합.",
+    "required_terms": ["신청서식 단일화", "재무팀", "인사팀", "서식 배포", "의견 취합"],
+    "required_numbers": ["9월 5일", "9월 12일"],
+    "expectations": {"min_headings": 2, "min_tables": 1, "min_charts": 0, "min_lists": 1, "max_charts": 0}
+  }
+]
