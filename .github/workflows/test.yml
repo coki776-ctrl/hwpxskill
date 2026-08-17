@@ -212,15 +212,58 @@ jobs:
           print(f'complex report smoke OK: {p.stat().st_size} bytes, images={image_names}')
           PY
 
+      - name: Apply Hancom compatibility patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from app import add_hancom_compatibility_metadata
+          from scripts.validate import validate
+
+          p = Path('/tmp/kordoc-complex/output.hwpx')
+          add_hancom_compatibility_metadata(p)
+          errors = validate(str(p))
+          assert not errors, errors
+          print(f'Hancom compatibility patch OK: {p.stat().st_size} bytes')
+          PY
+
+      - name: Verify Hancom compatibility metadata
+        run: |
+          python - <<'PY'
+          import zipfile
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          p = Path('/tmp/kordoc-complex/output.hwpx')
+          with zipfile.ZipFile(p) as z:
+              names = z.namelist()
+              assert 'version.xml' in names
+              assert 'settings.xml' in names
+              ET.fromstring(z.read('version.xml'))
+              ET.fromstring(z.read('settings.xml'))
+              hpf = z.read('Contents/content.hpf')
+              root = ET.fromstring(hpf)
+              manifest_items = [
+                  elem.attrib.get('href')
+                  for elem in root.iter()
+                  if elem.tag.endswith('item')
+              ]
+              assert 'settings.xml' in manifest_items, manifest_items
+              section = z.read('Contents/section0.xml').decode('utf-8')
+              assert '사립학교 재정 분석 보고서' in section
+              image_names = [name for name in names if name.lower().endswith('.png')]
+              assert len(image_names) >= 2
+          print('Hancom compatibility metadata verified')
+          PY
+
       - name: Stage complex HWPX artifact
         run: |
           mkdir -p artifacts
-          cp /tmp/kordoc-complex/output.hwpx artifacts/kordoc_complex_report.hwpx
+          cp /tmp/kordoc-complex/output.hwpx artifacts/kordoc_complex_report_compat.hwpx
 
       - name: Upload complex HWPX artifact
         uses: actions/upload-artifact@v4
         with:
-          name: kordoc-complex-report
-          path: artifacts/kordoc_complex_report.hwpx
+          name: kordoc-complex-report-compat
+          path: artifacts/kordoc_complex_report_compat.hwpx
           if-no-files-found: error
           retention-days: 7
