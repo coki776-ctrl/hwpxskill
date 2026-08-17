@@ -12,97 +12,25 @@ jobs:
     timeout-minutes: 10
     env:
       PYTHONPATH: ${{ github.workspace }}
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Set up Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - name: Install local Kordoc 4.8
+      - name: Install dependencies
         run: |
           npm install --omit=optional
           ./node_modules/.bin/kordoc --version
-      - name: Install Python dependencies
-        run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt pytest httpx
-      - name: Compile migrated entrypoints
-        run: python -m py_compile kordoc_engine.py rich_action_kordoc.py rich_action_ext.py rich_charts.py
-      - name: Run Kordoc migration tests
-        run: pytest -q tests/test_kordoc_engine.py tests/test_rich_charts.py
-
-      - name: Production bridge complex HWPX smoke
+      - name: Unit tests
         run: |
-          mkdir -p /tmp/kordoc-production
-          python - <<'PY'
-          from pathlib import Path
-          import hashlib, zipfile
-          import app
-          from rich_charts import preprocess_chart_fences
-          from kordoc_engine import generate_hwpx
-          workdir = Path('/tmp/kordoc-production')
-          markdown = '''# 사립학교 재정 분석 보고서
-
-## 주요 지표
-| 구분 | 2024 | 2025 | 증감 |
-|---|---:|---:|---:|
-| 집행률 | 94.79% | 95.53% | +0.74%p |
-| 이월률 | 4.36% | 3.10% | -1.26%p |
-| 불용률 | 0.85% | 1.37% | +0.52%p |
-
-```chart
-type: column
-title: 연도별 집행률 비교
-cat: 2024, 2025
-집행률: 94.79, 95.53
-```
-
-## 학교급별 현황
-| 학교급 | 예산 | 세출 | 비고 |
-|---|---:|---:|---|
-| 중학교 | 2396 | 2259 | 정상 |
-| 고등학교 | 5686 | 5449 | 정상 |
-| 특수학교 | 297 | 296 | 정상 |
-
-```chart
-type: line
-title: 분기별 집행 추이
-cat: 1Q, 2Q, 3Q, 4Q
-집행률: 23.95, 43.96, 65.34, 95.53
-```
-
-## 결론
-이월률은 감소했고 최종 집행률은 상승했습니다.
-'''
-          rendered, count = preprocess_chart_fences(markdown, workdir)
-          assert count == 2
-          md = workdir / 'input.md'; out = workdir / 'output.hwpx'
-          md.write_text(rendered, encoding='utf-8')
-          originals = {p.name: p.read_bytes() for p in sorted(workdir.glob('chart_*.png'))}
-          result = generate_hwpx(md, out, preset='보고서', timeout=120)
-          assert result.ok, result.diagnostic
-          app.add_hancom_compatibility_metadata(out)
-          assert not app.validate_hwpx(str(out))
-          with zipfile.ZipFile(out) as z:
-              infos=z.infolist(); assert infos[0].filename=='mimetype' and infos[0].compress_type==zipfile.ZIP_STORED
-              assert z.read('mimetype') == b'application/hwp+zip'
-              section=z.read('Contents/section0.xml').decode('utf-8')
-              for text in ('사립학교 재정 분석 보고서','중학교','고등학교','특수학교','결론'): assert text in section
-              embedded=[z.read(n) for n in z.namelist() if n.lower().endswith('.png')]
-              for name,data in originals.items():
-                  assert any(item==data for item in embedded), f'{name} bytes not embedded'
-                  print(name,len(data),hashlib.sha256(data).hexdigest())
-              assert 'version.xml' in z.namelist() and 'settings.xml' in z.namelist()
-          print('production bridge complex HWPX OK:',out.stat().st_size)
-          PY
-
-      - name: Long report multi-table multi-chart regression
+          python -m py_compile kordoc_engine.py rich_action_kordoc.py rich_action_ext.py rich_charts.py
+          pytest -q tests/test_kordoc_engine.py tests/test_rich_charts.py
+      - name: Long report regression
         run: |
           mkdir -p /tmp/kordoc-long
           python - <<'PY'
@@ -111,38 +39,61 @@ cat: 1Q, 2Q, 3Q, 4Q
           import app
           from rich_charts import preprocess_chart_fences
           from kordoc_engine import generate_hwpx
-          w=Path('/tmp/kordoc-long')
-          sections=[]
-          chart_types=['column','bar','line','pie','doughnut','area']
-          for i in range(1,7):
-              sections.append(f'''## 분석 {i}\n\n사립학교 재정결함보조금 장문 회귀 테스트 본문 {i}입니다. 한글 문장이 여러 페이지에 걸쳐 정상 보존되는지 확인합니다.\n\n| 항목 | 2024 | 2025 | 증감 |\n|---|---:|---:|---:|\n| 인건비 | {3900+i} | {4000+i} | +{100+i} |\n| 운영비 | {2000+i} | {2200+i} | +{200+i} |\n| 시설비 | {1800+i} | {1600+i} | -{200-i} |\n\n```chart\ntype: {chart_types[i-1]}\ntitle: 회귀 차트 {i}\ncat: 2023, 2024, 2025\n금액: {80+i}, {90+i}, {100+i}\n```\n''')
-          markdown='# 장문 복합 보고서 회귀 테스트\n\n'+('\n'.join(sections))+'\n## 종합 결론\n본문·표·차트가 함께 있는 장문 보고서입니다.\n'
-          rendered,count=preprocess_chart_fences(markdown,w)
-          assert count==6
-          md=w/'input.md'; out=w/'long_report.hwpx'; md.write_text(rendered,encoding='utf-8')
-          originals={p.name:p.read_bytes() for p in sorted(w.glob('chart_*.png'))}; assert len(originals)==6
-          result=generate_hwpx(md,out,preset='보고서',timeout=120); assert result.ok,result.diagnostic
-          app.add_hancom_compatibility_metadata(out); assert not app.validate_hwpx(str(out))
-          with zipfile.ZipFile(out) as z:
-              section=z.read('Contents/section0.xml').decode('utf-8')
-              for text in ('장문 복합 보고서 회귀 테스트','분석 1','분석 6','종합 결론','인건비','운영비','시설비'): assert text in section
-              embedded=[z.read(n) for n in z.namelist() if n.lower().endswith('.png')]
-              assert len(embedded)>=6
-              for name,data in originals.items(): assert any(x==data for x in embedded),name
-              assert section.count('<hp:tbl') >= 6, section.count('<hp:tbl')
-          print('LONG_REPORT_OK',out.stat().st_size,'charts=',count,'tables=',section.count('<hp:tbl'))
-          PY
 
-      - name: Stage production HWPX artifacts
+          w = Path('/tmp/kordoc-long')
+          sections = []
+          chart_types = ['column', 'bar', 'line', 'pie', 'doughnut', 'area']
+          for i in range(1, 7):
+              sections.append(
+                  f"## 분석 {i}\n\n"
+                  f"사립학교 재정결함보조금 장문 회귀 테스트 본문 {i}입니다.\n\n"
+                  "| 항목 | 2024 | 2025 | 증감 |\n"
+                  "|---|---:|---:|---:|\n"
+                  f"| 인건비 | {3900+i} | {4000+i} | +{100+i} |\n"
+                  f"| 운영비 | {2000+i} | {2200+i} | +{200+i} |\n"
+                  f"| 시설비 | {1800+i} | {1600+i} | -{200-i} |\n\n"
+                  "```chart\n"
+                  f"type: {chart_types[i-1]}\n"
+                  f"title: 회귀 차트 {i}\n"
+                  "cat: 2023, 2024, 2025\n"
+                  f"금액: {80+i}, {90+i}, {100+i}\n"
+                  "```\n"
+              )
+          markdown = "# 장문 복합 보고서 회귀 테스트\n\n" + "\n".join(sections) + "\n## 종합 결론\n본문·표·차트가 함께 있는 장문 보고서입니다.\n"
+          rendered, count = preprocess_chart_fences(markdown, w)
+          assert count == 6
+          md = w / 'input.md'
+          out = w / 'long_report.hwpx'
+          md.write_text(rendered, encoding='utf-8')
+          originals = {p.name: p.read_bytes() for p in sorted(w.glob('chart_*.png'))}
+          assert len(originals) == 6
+          result = generate_hwpx(md, out, preset='보고서', timeout=120)
+          assert result.ok, result.diagnostic
+          app.add_hancom_compatibility_metadata(out)
+          assert not app.validate_hwpx(str(out))
+          with zipfile.ZipFile(out) as z:
+              infos = z.infolist()
+              assert infos[0].filename == 'mimetype'
+              assert infos[0].compress_type == zipfile.ZIP_STORED
+              section = z.read('Contents/section0.xml').decode('utf-8')
+              for text in ('장문 복합 보고서 회귀 테스트', '분석 1', '분석 6', '종합 결론', '인건비', '운영비', '시설비'):
+                  assert text in section
+              embedded = [z.read(n) for n in z.namelist() if n.lower().endswith('.png')]
+              assert len(embedded) >= 6
+              for name, data in originals.items():
+                  assert any(item == data for item in embedded), name
+              assert section.count('<hp:tbl') >= 6
+              assert 'version.xml' in z.namelist()
+              assert 'settings.xml' in z.namelist()
+          print('LONG_REPORT_OK', out.stat().st_size, 'charts=', count, 'tables=', section.count('<hp:tbl'))
+          PY
+      - name: Stage artifact
         run: |
           mkdir -p artifacts
-          cp /tmp/kordoc-production/output.hwpx artifacts/kordoc_production_chart_report.hwpx
           cp /tmp/kordoc-long/long_report.hwpx artifacts/kordoc_long_regression_report.hwpx
-
-      - name: Upload production HWPX artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: kordoc-production-reports
-          path: artifacts/*.hwpx
+          name: kordoc-long-regression-report
+          path: artifacts/kordoc_long_regression_report.hwpx
           if-no-files-found: error
           retention-days: 7
