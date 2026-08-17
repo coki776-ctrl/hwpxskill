@@ -211,3 +211,16 @@ jobs:
               assert sum(1 for name in image_names if name in hpf or Path(name).name in hpf) >= 2
           print(f'complex report smoke OK: {p.stat().st_size} bytes, images={image_names}')
           PY
+
+      - name: Stage complex HWPX artifact
+        run: |
+          mkdir -p artifacts
+          cp /tmp/kordoc-complex/output.hwpx artifacts/kordoc_complex_report.hwpx
+
+      - name: Upload complex HWPX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kordoc-complex-report
+          path: artifacts/kordoc_complex_report.hwpx
+          if-no-files-found: error
+          retention-days: 7
