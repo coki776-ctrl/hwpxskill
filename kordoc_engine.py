@@ -36,15 +36,14 @@ def generate_hwpx(
     output_path: Path,
     *,
     preset: str,
-    image_dir: Path | None = None,
     timeout: int = 120,
     extra_args: Sequence[str] = (),
 ) -> KordocResult:
     """Generate HWPX through Kordoc CLI.
 
-    This module is deliberately thin: FastAPI owns request/response orchestration,
-    while Kordoc owns HWPX rendering. Keeping this boundary small prevents the
-    server from growing a second document engine.
+    Local Markdown images are resolved by Kordoc relative to the Markdown file,
+    so callers should place generated PNGs beside ``markdown_path``. Kordoc
+    4.4.0 does not support an ``--image-dir`` option.
     """
     command = [
         "kordoc",
@@ -55,8 +54,6 @@ def generate_hwpx(
         "--preset",
         preset,
     ]
-    if image_dir is not None:
-        command += ["--image-dir", str(image_dir)]
     command += list(extra_args)
 
     proc = subprocess.run(
