@@ -7,9 +7,8 @@ import kordoc_engine
 def test_generate_hwpx_builds_kordoc_command(monkeypatch, tmp_path: Path):
     md = tmp_path / "input.md"
     out = tmp_path / "output.hwpx"
-    images = tmp_path / "images"
-    md.write_text("# 테스트", encoding="utf-8")
-    images.mkdir()
+    md.write_text("# 테스트\n\n![차트](chart_1.png)", encoding="utf-8")
+    (tmp_path / "chart_1.png").write_bytes(b"png")
     captured = {}
 
     def fake_run(command, **kwargs):
@@ -23,7 +22,6 @@ def test_generate_hwpx_builds_kordoc_command(monkeypatch, tmp_path: Path):
         md,
         out,
         preset="보고서",
-        image_dir=images,
     )
 
     assert result.ok is True
@@ -35,9 +33,8 @@ def test_generate_hwpx_builds_kordoc_command(monkeypatch, tmp_path: Path):
         str(out),
         "--preset",
         "보고서",
-        "--image-dir",
-        str(images),
     ]
+    assert "--image-dir" not in captured["command"]
 
 
 def test_generate_hwpx_reports_cli_failure(monkeypatch, tmp_path: Path):
