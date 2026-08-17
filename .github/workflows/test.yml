@@ -4,7 +4,7 @@ on:
   pull_request:
   push:
     branches:
-      - agent/kordoc-default-engine
+      - agent/hwpx-api
 
 jobs:
   kordoc-migration:
@@ -51,14 +51,28 @@ jobs:
           test -s /tmp/kordoc-smoke/output.hwpx
           python - <<'PY'
           import zipfile
+          import xml.etree.ElementTree as ET
           from pathlib import Path
+
           p = Path('/tmp/kordoc-smoke/output.hwpx')
           assert p.stat().st_size > 0
           with zipfile.ZipFile(p) as z:
+              infos = z.infolist()
+              assert infos, 'empty HWPX archive'
+              assert infos[0].filename == 'mimetype', infos[0].filename
+              assert infos[0].compress_type == zipfile.ZIP_STORED, infos[0].compress_type
+              assert z.read('mimetype') == b'application/hwp+zip'
+
               names = set(z.namelist())
               assert 'Contents/section0.xml' in names
               assert 'Contents/content.hpf' in names
-          print(f'real Kordoc smoke OK: {p.stat().st_size} bytes')
+
+              section = z.read('Contents/section0.xml')
+              ET.fromstring(section)
+              decoded = section.decode('utf-8')
+              assert '테스트' in decoded
+              assert 'Kordoc 실제 HWPX 생성 확인용 문서입니다.' in decoded
+          print(f'real Kordoc structure smoke OK: {p.stat().st_size} bytes')
           PY
 
       - name: Real Kordoc table smoke test
@@ -77,12 +91,16 @@ jobs:
           test -s /tmp/kordoc-table/output.hwpx
           python - <<'PY'
           import zipfile
+          import xml.etree.ElementTree as ET
           from pathlib import Path
+
           p = Path('/tmp/kordoc-table/output.hwpx')
           with zipfile.ZipFile(p) as z:
               section = z.read('Contents/section0.xml')
-              assert b'49' in section
-              assert b'68' in section
+              ET.fromstring(section)
+              decoded = section.decode('utf-8')
+              for expected in ('표 테스트', '중학교', '고등학교', '특수학교', '49', '68', '99.6%'):
+                  assert expected in decoded, expected
           print(f'table smoke OK: {p.stat().st_size} bytes')
           PY
 
@@ -106,6 +124,7 @@ jobs:
           rendered, count = preprocess_chart_fences(markdown, workdir)
           assert count == 1
           assert (workdir / 'chart_1.png').is_file()
+          assert 'chart_1.png' in rendered
           (workdir / 'input.md').write_text(rendered, encoding='utf-8')
           PY
           cd /tmp/kordoc-chart
@@ -113,11 +132,18 @@ jobs:
           test -s output.hwpx
           python - <<'PY'
           import zipfile
+          import xml.etree.ElementTree as ET
           from pathlib import Path
+
           p = Path('/tmp/kordoc-chart/output.hwpx')
           with zipfile.ZipFile(p) as z:
+              section = z.read('Contents/section0.xml')
+              ET.fromstring(section)
+              assert '차트 테스트' in section.decode('utf-8')
               names = z.namelist()
               image_names = [name for name in names if name.lower().endswith(('.png', '.jpg', '.jpeg'))]
-              assert image_names, names
-          print(f'chart smoke OK: {p.stat().st_size} bytes')
+              assert len(image_names) >= 1, names
+              hpf = z.read('Contents/content.hpf').decode('utf-8')
+              assert any(name in hpf or Path(name).name in hpf for name in image_names)
+          print(f'chart smoke OK: {p.stat().st_size} bytes, images={image_names}')
           PY
