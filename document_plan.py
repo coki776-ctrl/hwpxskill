@@ -130,6 +130,54 @@ DocumentBlock = Annotated[
 ]
 
 
+def _parse_numeric_cell(value: str) -> float | None:
+    normalized = value.strip().replace(",", "")
+    if normalized.endswith("%"):
+        normalized = normalized[:-1].strip()
+    try:
+        number = float(normalized)
+    except ValueError:
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _aligned_table_chart_errors(blocks: list[DocumentBlock]) -> list[str]:
+    """Check only strongly aligned table/chart pairs.
+
+    The rule intentionally stays narrow: caption/title must match exactly, the
+    table's first column must exactly match chart categories, and a table header
+    must exactly match a chart series name. Only then are numeric values compared.
+    """
+    tables = [block for block in blocks if isinstance(block, TableBlock) and block.caption]
+    charts = [block for block in blocks if isinstance(block, ChartBlock) and block.title]
+    errors: list[str] = []
+
+    for table in tables:
+        if len(table.headers) < 2:
+            continue
+        table_categories = [row[0].strip() for row in table.rows]
+        for chart in charts:
+            if table.caption != chart.title or table_categories != chart.categories:
+                continue
+            for series in chart.series:
+                if series.name not in table.headers[1:]:
+                    continue
+                column = table.headers.index(series.name)
+                table_values = [_parse_numeric_cell(row[column]) for row in table.rows]
+                if any(value is None for value in table_values):
+                    continue
+                for category, table_value, chart_value in zip(
+                    chart.categories, table_values, series.values
+                ):
+                    if not math.isclose(float(table_value), chart_value, rel_tol=1e-9, abs_tol=1e-9):
+                        errors.append(
+                            "cross-block data mismatch for "
+                            f"'{table.caption}' / '{series.name}' / '{category}': "
+                            f"table={table_value:g}, chart={chart_value:g}"
+                        )
+    return errors
+
+
 class DocumentPlan(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -137,6 +185,13 @@ class DocumentPlan(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     preset: Literal["보고서", "기안문", "계획서", "통지", "회의록", "개조식", "보도자료"] = "보고서"
     blocks: list[DocumentBlock] = Field(min_length=1, max_length=60)
+
+    @model_validator(mode="after")
+    def validate_cross_block_consistency(self) -> "DocumentPlan":
+        errors = _aligned_table_chart_errors(self.blocks)
+        if errors:
+            raise ValueError("; ".join(errors))
+        return self
 
 
 def assign_block_ids(plan: DocumentPlan) -> list[dict]:
