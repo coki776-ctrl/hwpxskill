@@ -41,11 +41,20 @@ class CalloutBlock(_StrictModel):
     title: str | None = Field(default=None, max_length=100)
 
 
+class MetricDerivation(_StrictModel):
+    kind: Literal["percent_decrease"]
+    source_chart_title: str = Field(min_length=1, max_length=200)
+    series: str = Field(min_length=1, max_length=80)
+    from_category: str = Field(min_length=1, max_length=100)
+    to_category: str = Field(min_length=1, max_length=100)
+
+
 class MetricBlock(_StrictModel):
     type: Literal["metric"]
     label: str = Field(min_length=1, max_length=120)
     value: str = Field(min_length=1, max_length=80)
     emphasis: Literal["positive", "negative", "neutral"] = "neutral"
+    derivation: MetricDerivation | None = None
 
 
 class TableBlock(_StrictModel):
@@ -178,6 +187,85 @@ def _aligned_table_chart_errors(blocks: list[DocumentBlock]) -> list[str]:
     return errors
 
 
+def _derived_metric_errors(blocks: list[DocumentBlock]) -> list[str]:
+    """Validate only metrics that explicitly declare a supported derivation."""
+    charts = [block for block in blocks if isinstance(block, ChartBlock)]
+    errors: list[str] = []
+
+    for metric in [block for block in blocks if isinstance(block, MetricBlock) and block.derivation]:
+        derivation = metric.derivation
+        assert derivation is not None
+        matching_charts = [
+            chart for chart in charts if chart.title == derivation.source_chart_title
+        ]
+        if len(matching_charts) != 1:
+            errors.append(
+                f"derived metric '{metric.label}' requires exactly one source chart "
+                f"titled '{derivation.source_chart_title}'"
+            )
+            continue
+        chart = matching_charts[0]
+
+        matching_series = [series for series in chart.series if series.name == derivation.series]
+        if len(matching_series) != 1:
+            errors.append(
+                f"derived metric '{metric.label}' requires exactly one series "
+                f"named '{derivation.series}'"
+            )
+            continue
+        series = matching_series[0]
+
+        if chart.categories.count(derivation.from_category) != 1:
+            errors.append(
+                f"derived metric '{metric.label}' requires unique from_category "
+                f"'{derivation.from_category}'"
+            )
+            continue
+        if chart.categories.count(derivation.to_category) != 1:
+            errors.append(
+                f"derived metric '{metric.label}' requires unique to_category "
+                f"'{derivation.to_category}'"
+            )
+            continue
+
+        from_index = chart.categories.index(derivation.from_category)
+        to_index = chart.categories.index(derivation.to_category)
+        from_value = series.values[from_index]
+        to_value = series.values[to_index]
+
+        if derivation.kind == "percent_decrease":
+            if from_value <= 0:
+                errors.append(
+                    f"derived metric '{metric.label}' percent_decrease requires a positive starting value"
+                )
+                continue
+            if to_value > from_value:
+                errors.append(
+                    f"derived metric '{metric.label}' percent_decrease source values do not decrease"
+                )
+                continue
+            if not metric.value.strip().endswith("%"):
+                errors.append(
+                    f"derived metric '{metric.label}' percent_decrease value must be a percentage"
+                )
+                continue
+            actual = _parse_numeric_cell(metric.value)
+            if actual is None:
+                errors.append(
+                    f"derived metric '{metric.label}' value is not numeric"
+                )
+                continue
+            expected = (from_value - to_value) / from_value * 100.0
+            if not math.isclose(actual, expected, rel_tol=0.0, abs_tol=0.05):
+                errors.append(
+                    f"derived metric mismatch for '{metric.label}': "
+                    f"value={actual:g}%, expected={expected:.6g}% from "
+                    f"'{derivation.source_chart_title}' / '{derivation.series}' / "
+                    f"'{derivation.from_category}' -> '{derivation.to_category}'"
+                )
+    return errors
+
+
 class DocumentPlan(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -189,6 +277,7 @@ class DocumentPlan(BaseModel):
     @model_validator(mode="after")
     def validate_cross_block_consistency(self) -> "DocumentPlan":
         errors = _aligned_table_chart_errors(self.blocks)
+        errors.extend(_derived_metric_errors(self.blocks))
         if errors:
             raise ValueError("; ".join(errors))
         return self
