@@ -14,6 +14,7 @@ FastAPI should own authentication, request validation, temporary file/job manage
 - Route the deployed rich-document app through `rich_action_kordoc.py` without deleting the legacy path.
 - Keep chart preprocessing, Action endpoints, job handling, download URLs, Hancom compatibility metadata, and current validation in place.
 - Add tests for Kordoc command construction and failure handling.
+- Add GitHub Actions CI so regression checks can run without a local desktop environment.
 
 ## Keep for now
 
