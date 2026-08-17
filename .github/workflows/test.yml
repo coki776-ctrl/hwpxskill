@@ -37,7 +37,7 @@ jobs:
       - name: Run Kordoc migration tests
         run: pytest -q tests/test_kordoc_engine.py tests/test_rich_charts.py
 
-      - name: Diagnose PNG bytes before and after Kordoc
+      - name: Diagnose PNG bytes before and after Kordoc 4.4 CLI
         run: |
           mkdir -p /tmp/kordoc-image-diag
           python - <<'PY'
@@ -66,20 +66,53 @@ jobs:
           (workdir / 'input.md').write_text(rendered, encoding='utf-8')
           PY
           cd /tmp/kordoc-image-diag
-          kordoc generate input.md -o output.hwpx --preset 보고서
+          kordoc generate input.md -o output_cli44.hwpx --preset 보고서
           python - <<'PY'
           from pathlib import Path
           import zipfile, hashlib
-          p = Path('/tmp/kordoc-image-diag/output.hwpx')
+          p = Path('/tmp/kordoc-image-diag/output_cli44.hwpx')
           input_data = Path('/tmp/kordoc-image-diag/chart_1.png').read_bytes()
           with zipfile.ZipFile(p) as z:
               image_names = [n for n in z.namelist() if n.lower().endswith('.png')]
               assert image_names, z.namelist()
               embedded = z.read(image_names[0])
-              print('EMBEDDED_NAME=', image_names[0])
-              print('EMBEDDED_PNG_SIZE=', len(embedded))
-              print('EMBEDDED_PNG_SHA256=', hashlib.sha256(embedded).hexdigest())
-              print('EMBEDDED_PNG_SIGNATURE=', embedded[:8].hex())
-              print('PNG_BYTES_IDENTICAL=', input_data == embedded)
-              assert embedded[:8] == b'\x89PNG\r\n\x1a\n'
+              print('CLI44_EMBEDDED_NAME=', image_names[0])
+              print('CLI44_EMBEDDED_PNG_SIZE=', len(embedded))
+              print('CLI44_EMBEDDED_PNG_SHA256=', hashlib.sha256(embedded).hexdigest())
+              print('CLI44_PNG_BYTES_IDENTICAL=', input_data == embedded)
+          PY
+
+      - name: PoC real PNG embed with Kordoc 4.8 JS API
+        run: |
+          mkdir -p /tmp/kordoc-api-poc
+          cd /tmp/kordoc-api-poc
+          npm init -y >/dev/null 2>&1
+          npm install kordoc@4.8.0 --omit=optional
+          cat > embed.mjs <<'JS'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          import { markdownToHwpx } from 'kordoc';
+
+          const md = readFileSync('/tmp/kordoc-image-diag/input.md', 'utf8');
+          const png = new Uint8Array(readFileSync('/tmp/kordoc-image-diag/chart_1.png'));
+          const out = await markdownToHwpx(md, {
+            gongmun: { preset: '보고서' },
+            images: { 'chart_1.png': png },
+          });
+          writeFileSync('/tmp/kordoc-image-diag/output_api48.hwpx', Buffer.from(out));
+          JS
+          node embed.mjs
+          python - <<'PY'
+          from pathlib import Path
+          import zipfile, hashlib
+          p = Path('/tmp/kordoc-image-diag/output_api48.hwpx')
+          input_data = Path('/tmp/kordoc-image-diag/chart_1.png').read_bytes()
+          with zipfile.ZipFile(p) as z:
+              image_names = [n for n in z.namelist() if n.lower().endswith('.png')]
+              assert image_names, z.namelist()
+              embedded = z.read(image_names[0])
+              print('API48_EMBEDDED_NAME=', image_names[0])
+              print('API48_EMBEDDED_PNG_SIZE=', len(embedded))
+              print('API48_EMBEDDED_PNG_SHA256=', hashlib.sha256(embedded).hexdigest())
+              print('API48_PNG_BYTES_IDENTICAL=', input_data == embedded)
+              assert embedded == input_data, (len(input_data), len(embedded))
           PY
