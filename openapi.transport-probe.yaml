@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: HWPX Action Transport Probe
-  version: 1.0.0
+  version: 1.0.1
   description: Minimal schema used only to isolate Custom GPT Action transport behavior.
 servers:
   - url: https://hwpxskill-api.onrender.com
@@ -19,12 +19,17 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  ok:
-                    type: boolean
-                required: [ok]
+                $ref: "#/components/schemas/TransportProbeResponse"
 components:
+  schemas:
+    TransportProbeResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+      required:
+        - ok
+      additionalProperties: false
   securitySchemes:
     bearerAuth:
       type: http
