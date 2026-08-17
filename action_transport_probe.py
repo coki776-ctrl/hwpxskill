@@ -1,4 +1,5 @@
-import app as app_module
+from fastapi.responses import JSONResponse
+
 from rich_action_kordoc import app
 
 
@@ -20,17 +21,18 @@ _remove_create_rich_route()
     "/action/create-rich",
     operation_id="createRichHwpx",
 )
-def create_rich_transport_stub(
-    payload: app_module.CreateRichHwpxRequest,
-) -> dict[str, bool | int]:
-    """Temporary transport diagnostic with no auth or document work.
+def create_rich_transport_stub() -> JSONResponse:
+    """Absolute-minimum transport diagnostic.
 
-    Deliberately performs no API-key validation, Kordoc, HWPX, chart,
-    file, or subprocess work. It only parses the JSON body and returns
-    the response shape already declared in the committed OpenAPI schema.
+    Intentionally performs no auth, request-body parsing, Pydantic validation,
+    Kordoc, HWPX, chart, file, subprocess, or response-model validation.
+    FastAPI ignores any request body and returns a fixed HTTP 200 JSON payload.
     """
-    return {
-        "ok": True,
-        "validated": False,
-        "layout_warning_count": 0,
-    }
+    return JSONResponse(
+        status_code=200,
+        content={
+            "ok": True,
+            "validated": False,
+            "layout_warning_count": 0,
+        },
+    )
