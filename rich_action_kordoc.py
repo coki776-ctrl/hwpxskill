@@ -35,7 +35,7 @@ def _generate_rich_hwpx(
         output = workdir / "output.hwpx"
 
         try:
-            rendered_markdown, png_chart_count = preprocess_chart_fences(
+            rendered_markdown, _png_chart_count = preprocess_chart_fences(
                 payload.markdown,
                 workdir,
             )
@@ -44,11 +44,12 @@ def _generate_rich_hwpx(
             return False, "chart_rendering", f"{type(exc).__name__}: {exc}", 0
 
         try:
+            # preprocess_chart_fences writes chart PNGs beside input.md. Kordoc
+            # resolves those relative Markdown image paths directly.
             result = generate_hwpx(
                 markdown_path,
                 output,
                 preset=payload.preset,
-                image_dir=workdir if png_chart_count else None,
                 timeout=120,
             )
         except subprocess.TimeoutExpired:
