@@ -1,3 +1,6 @@
+import pytest
+from pydantic import ValidationError
+
 from document_plan import DocumentPlan
 
 
@@ -30,16 +33,22 @@ def _repeated_fact_plan() -> dict:
     }
 
 
-def test_v01_schema_allows_one_copy_of_a_repeated_fact_to_diverge():
-    original = DocumentPlan.model_validate(_repeated_fact_plan())
-    assert original.blocks[1].rows[1][1] == "1200"
-    assert original.blocks[2].series[0].values[1] == 1200
+def test_aligned_table_and_chart_with_same_values_remain_valid():
+    plan = DocumentPlan.model_validate(_repeated_fact_plan())
+    assert plan.blocks[1].rows[1][1] == "1200"
+    assert plan.blocks[2].series[0].values[1] == 1200
 
+
+def test_aligned_table_and_chart_reject_one_copy_of_a_repeated_fact_diverging():
     payload = _repeated_fact_plan()
     payload["blocks"][2]["series"][0]["values"][1] = 1000
-    edited = DocumentPlan.model_validate(payload)
+    with pytest.raises(ValidationError, match="cross-block data mismatch"):
+        DocumentPlan.model_validate(payload)
 
-    # Evidence probe: v0.1 validates block shapes independently, so a stale table
-    # value and an edited chart value can coexist without a validation error.
-    assert edited.blocks[1].rows[1][1] == "1200"
-    assert edited.blocks[2].series[0].values[1] == 1000
+
+def test_unrelated_table_and_chart_are_not_forced_to_match():
+    payload = _repeated_fact_plan()
+    payload["blocks"][2]["title"] = "별도 분석 차트"
+    payload["blocks"][2]["series"][0]["values"][1] = 1000
+    plan = DocumentPlan.model_validate(payload)
+    assert plan.blocks[2].series[0].values[1] == 1000
