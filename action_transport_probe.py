@@ -23,9 +23,18 @@ _remove_create_rich_route()
     operation_id="createRichHwpx",
     dependencies=[Depends(app_module.require_api_key)],
 )
-def create_rich_transport_stub(payload: app_module.CreateRichHwpxRequest) -> dict[str, bool]:
-    """Temporary diagnostic stub: no HWPX/Kordoc/file/chart work at all."""
-    return {"ok": True}
+def create_rich_transport_stub(
+    payload: app_module.CreateRichHwpxRequest,
+) -> dict[str, bool | int]:
+    """Temporary diagnostic stub matching the committed OpenAPI response shape.
+
+    Deliberately performs no Kordoc, HWPX, chart, file, or subprocess work.
+    """
+    return {
+        "ok": True,
+        "validated": False,
+        "layout_warning_count": 0,
+    }
 
 
 @app.post(
