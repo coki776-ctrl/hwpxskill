@@ -39,20 +39,21 @@ def generate_hwpx(
     timeout: int = 120,
     extra_args: Sequence[str] = (),
 ) -> KordocResult:
-    """Generate HWPX through Kordoc CLI.
+    """Generate HWPX through the Kordoc JS API bridge.
 
-    Local Markdown images are resolved by Kordoc relative to the Markdown file,
-    so callers should place generated PNGs beside ``markdown_path``. Kordoc
-    4.4.0 does not support an ``--image-dir`` option.
+    Generated PNG files beside the Markdown input are supplied explicitly to
+    Kordoc's ``images`` option so the real image bytes are embedded instead of
+    placeholder PNGs.
     """
+    bridge = Path(__file__).with_name("kordoc_bridge.mjs")
+    image_names = sorted(path.name for path in markdown_path.parent.glob("*.png"))
     command = [
-        "kordoc",
-        "generate",
+        "node",
+        str(bridge),
         str(markdown_path),
-        "-o",
         str(output_path),
-        "--preset",
         preset,
+        *image_names,
     ]
     command += list(extra_args)
 
