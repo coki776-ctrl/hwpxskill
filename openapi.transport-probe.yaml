@@ -1,0 +1,31 @@
+openapi: 3.1.0
+info:
+  title: HWPX Action Transport Probe
+  version: 1.0.0
+  description: Minimal schema used only to isolate Custom GPT Action transport behavior.
+servers:
+  - url: https://hwpxskill-api.onrender.com
+paths:
+  /action/transport-probe:
+    post:
+      operationId: probeActionTransport
+      summary: Test GPT Action transport only.
+      description: Returns immediately without running Kordoc, HWPX, chart, file, or subprocess logic.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Transport probe succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
