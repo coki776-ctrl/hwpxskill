@@ -1,0 +1,209 @@
+from __future__ import annotations
+
+import math
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+class _StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+
+class HeadingBlock(_StrictModel):
+    type: Literal["heading"]
+    text: str = Field(min_length=1, max_length=200)
+    level: int = Field(default=1, ge=1, le=3)
+
+
+class ParagraphBlock(_StrictModel):
+    type: Literal["paragraph"]
+    text: str = Field(min_length=1, max_length=5000)
+
+
+class ListBlock(_StrictModel):
+    type: Literal["list"]
+    items: list[str] = Field(min_length=1, max_length=30)
+    ordered: bool = False
+
+    @field_validator("items")
+    @classmethod
+    def validate_items(cls, items: list[str]) -> list[str]:
+        normalized = [item.strip() for item in items]
+        if any(not item for item in normalized):
+            raise ValueError("list items must not be empty")
+        return normalized
+
+
+class CalloutBlock(_StrictModel):
+    type: Literal["callout"]
+    text: str = Field(min_length=1, max_length=2000)
+    title: str | None = Field(default=None, max_length=100)
+
+
+class MetricBlock(_StrictModel):
+    type: Literal["metric"]
+    label: str = Field(min_length=1, max_length=120)
+    value: str = Field(min_length=1, max_length=80)
+    emphasis: Literal["positive", "negative", "neutral"] = "neutral"
+
+
+class TableBlock(_StrictModel):
+    type: Literal["table"]
+    headers: list[str] = Field(min_length=1, max_length=12)
+    rows: list[list[str]] = Field(min_length=1, max_length=100)
+    caption: str | None = Field(default=None, max_length=200)
+
+    @model_validator(mode="after")
+    def validate_shape(self) -> "TableBlock":
+        width = len(self.headers)
+        if any(not str(header).strip() for header in self.headers):
+            raise ValueError("table headers must not be empty")
+        for index, row in enumerate(self.rows, start=1):
+            if len(row) != width:
+                raise ValueError(
+                    f"table row {index} has {len(row)} cells; expected {width}"
+                )
+        return self
+
+
+class ChartSeries(_StrictModel):
+    name: str = Field(min_length=1, max_length=80)
+    values: list[float] = Field(min_length=1, max_length=50)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, name: str) -> str:
+        if ":" in name or "：" in name:
+            raise ValueError("chart series name must not contain ':' or '：'")
+        return name
+
+    @field_validator("values")
+    @classmethod
+    def validate_values(cls, values: list[float]) -> list[float]:
+        if any(not math.isfinite(value) for value in values):
+            raise ValueError("chart values must be finite numbers")
+        return values
+
+
+class ChartBlock(_StrictModel):
+    type: Literal["chart"]
+    chart_type: Literal["column", "bar", "line", "pie", "doughnut", "area"]
+    categories: list[str] = Field(min_length=1, max_length=50)
+    series: list[ChartSeries] = Field(min_length=1, max_length=8)
+    title: str | None = Field(default=None, max_length=200)
+
+    @field_validator("categories")
+    @classmethod
+    def validate_categories(cls, categories: list[str]) -> list[str]:
+        normalized = [item.strip() for item in categories]
+        if any(not item for item in normalized):
+            raise ValueError("chart categories must not be empty")
+        if any("," in item for item in normalized):
+            raise ValueError(
+                "chart categories must not contain commas because the current chart fence uses comma separators"
+            )
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_series_shape(self) -> "ChartBlock":
+        expected = len(self.categories)
+        for series in self.series:
+            if len(series.values) != expected:
+                raise ValueError(
+                    f"chart series '{series.name}' has {len(series.values)} values; expected {expected}"
+                )
+        if self.chart_type in {"pie", "doughnut"} and len(self.series) != 1:
+            raise ValueError("pie and doughnut charts require exactly one series")
+        return self
+
+
+DocumentBlock = Annotated[
+    HeadingBlock
+    | ParagraphBlock
+    | ListBlock
+    | CalloutBlock
+    | MetricBlock
+    | TableBlock
+    | ChartBlock,
+    Field(discriminator="type"),
+]
+
+
+class DocumentPlan(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    version: Literal["0.1"] = "0.1"
+    title: str = Field(min_length=1, max_length=200)
+    preset: Literal["보고서", "기안문", "계획서", "통지", "회의록", "개조식", "보도자료"] = "보고서"
+    blocks: list[DocumentBlock] = Field(min_length=1, max_length=60)
+
+
+def assign_block_ids(plan: DocumentPlan) -> list[dict]:
+    """Return normalized block dictionaries with deterministic internal IDs."""
+    return [
+        {"block_id": f"b{index:03d}", **block.model_dump()}
+        for index, block in enumerate(plan.blocks, start=1)
+    ]
+
+
+def _escape_table_cell(value: object) -> str:
+    flattened = " ".join(str(value).splitlines())
+    return flattened.replace("\\", "\\\\").replace("|", "\\|")
+
+
+def _format_number(value: float) -> str:
+    return str(int(value)) if value.is_integer() else format(value, ".12g")
+
+
+def document_plan_to_markdown(plan: DocumentPlan) -> str:
+    """Map a validated semantic plan to the existing rich Markdown/chart-fence input."""
+    chunks: list[str] = [f"# {plan.title}"]
+
+    for block in plan.blocks:
+        if isinstance(block, HeadingBlock):
+            chunks.append(f"{'#' * (block.level + 1)} {block.text}")
+        elif isinstance(block, ParagraphBlock):
+            chunks.append(block.text)
+        elif isinstance(block, ListBlock):
+            if block.ordered:
+                chunks.append("\n".join(f"{index}. {item}" for index, item in enumerate(block.items, start=1)))
+            else:
+                chunks.append("\n".join(f"- {item}" for item in block.items))
+        elif isinstance(block, CalloutBlock):
+            if block.title:
+                chunks.append(f"**{block.title}**\n\n{block.text}")
+            else:
+                chunks.append(f"**핵심**\n\n{block.text}")
+        elif isinstance(block, MetricBlock):
+            metric_heading = {
+                "positive": "핵심 지표 · 개선",
+                "negative": "핵심 지표 · 주의",
+                "neutral": "핵심 지표",
+            }[block.emphasis]
+            chunks.append(f"**{metric_heading}**\n\n**{block.label}: {block.value}**")
+        elif isinstance(block, TableBlock):
+            lines: list[str] = []
+            if block.caption:
+                lines.append(f"**{block.caption}**")
+                lines.append("")
+            lines.append("| " + " | ".join(_escape_table_cell(item) for item in block.headers) + " |")
+            lines.append("|" + "|".join("---" for _ in block.headers) + "|")
+            for row in block.rows:
+                lines.append("| " + " | ".join(_escape_table_cell(item) for item in row) + " |")
+            chunks.append("\n".join(lines))
+        elif isinstance(block, ChartBlock):
+            lines = ["```chart", f"type: {block.chart_type}"]
+            if block.title:
+                lines.append(f"title: {block.title}")
+            lines.append("cat: " + ", ".join(block.categories))
+            for series in block.series:
+                lines.append(
+                    f"{series.name}: " + ", ".join(_format_number(value) for value in series.values)
+                )
+            lines.append("```")
+            chunks.append("\n".join(lines))
+        else:  # pragma: no cover
+            raise TypeError(f"Unsupported document block: {type(block).__name__}")
+
+    return "\n\n".join(chunks).rstrip() + "\n"
