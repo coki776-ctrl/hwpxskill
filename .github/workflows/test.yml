@@ -60,3 +60,63 @@ jobs:
               assert 'Contents/content.hpf' in names
           print(f'real Kordoc smoke OK: {p.stat().st_size} bytes')
           PY
+
+      - name: Real Kordoc table smoke test
+        run: |
+          mkdir -p /tmp/kordoc-table
+          cat > /tmp/kordoc-table/input.md <<'MD'
+          # 표 테스트
+
+          | 학교급 | 학교수 | 집행률 |
+          |---|---:|---:|
+          | 중학교 | 49 | 94.0% |
+          | 고등학교 | 68 | 94.9% |
+          | 특수학교 | 4 | 99.6% |
+          MD
+          kordoc generate /tmp/kordoc-table/input.md -o /tmp/kordoc-table/output.hwpx --preset 보고서
+          test -s /tmp/kordoc-table/output.hwpx
+          python - <<'PY'
+          import zipfile
+          from pathlib import Path
+          p = Path('/tmp/kordoc-table/output.hwpx')
+          with zipfile.ZipFile(p) as z:
+              section = z.read('Contents/section0.xml')
+              assert b'49' in section
+              assert b'68' in section
+          print(f'table smoke OK: {p.stat().st_size} bytes')
+          PY
+
+      - name: Real PNG chart embed smoke test
+        run: |
+          mkdir -p /tmp/kordoc-chart
+          python - <<'PY'
+          from pathlib import Path
+          from rich_charts import preprocess_chart_fences
+
+          workdir = Path('/tmp/kordoc-chart')
+          markdown = '''# 차트 테스트
+
+          ```chart
+          type: column
+          title: 2024-2025 비교
+          cat: 2024, 2025
+          불용액: 100, 55
+          ```
+          '''
+          rendered, count = preprocess_chart_fences(markdown, workdir)
+          assert count == 1
+          assert (workdir / 'chart_1.png').is_file()
+          (workdir / 'input.md').write_text(rendered, encoding='utf-8')
+          PY
+          kordoc generate /tmp/kordoc-chart/input.md -o /tmp/kordoc-chart/output.hwpx --preset 보고서 --image-dir /tmp/kordoc-chart
+          test -s /tmp/kordoc-chart/output.hwpx
+          python - <<'PY'
+          import zipfile
+          from pathlib import Path
+          p = Path('/tmp/kordoc-chart/output.hwpx')
+          with zipfile.ZipFile(p) as z:
+              names = z.namelist()
+              image_names = [name for name in names if name.lower().endswith(('.png', '.jpg', '.jpeg'))]
+              assert image_names, names
+          print(f'chart smoke OK: {p.stat().st_size} bytes')
+          PY
