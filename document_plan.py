@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -281,6 +282,101 @@ class DocumentPlan(BaseModel):
         if errors:
             raise ValueError("; ".join(errors))
         return self
+
+
+def _format_percentage_like(template: str, value: float) -> str:
+    match = re.fullmatch(r"[+-]?\d+(?:\.(\d+))?%", template.strip())
+    decimals = len(match.group(1) or "") if match else 1
+    return f"{value:.{decimals}f}%"
+
+
+def update_linked_chart_value(
+    plan: DocumentPlan,
+    *,
+    chart_title: str,
+    series_name: str,
+    category: str,
+    value: float,
+) -> DocumentPlan:
+    """Update one chart data point and deterministic strongly linked copies.
+
+    Only exact relationships already represented by the validated plan are
+    propagated: strongly aligned tables and metrics with explicit derivations.
+    The input plan is not mutated.
+    """
+    numeric_value = float(value)
+    if not math.isfinite(numeric_value):
+        raise ValueError("edit value must be a finite number")
+
+    matching_chart_indexes = [
+        index
+        for index, block in enumerate(plan.blocks)
+        if isinstance(block, ChartBlock) and block.title == chart_title
+    ]
+    if len(matching_chart_indexes) != 1:
+        raise ValueError(f"expected exactly one chart titled '{chart_title}'")
+    chart_index = matching_chart_indexes[0]
+    chart = plan.blocks[chart_index]
+    assert isinstance(chart, ChartBlock)
+
+    matching_series_indexes = [
+        index for index, series in enumerate(chart.series) if series.name == series_name
+    ]
+    if len(matching_series_indexes) != 1:
+        raise ValueError(
+            f"expected exactly one series named '{series_name}' in chart '{chart_title}'"
+        )
+    series_index = matching_series_indexes[0]
+
+    if chart.categories.count(category) != 1:
+        raise ValueError(
+            f"expected exactly one category '{category}' in chart '{chart_title}'"
+        )
+    category_index = chart.categories.index(category)
+
+    payload = plan.model_dump()
+    payload["blocks"][chart_index]["series"][series_index]["values"][category_index] = numeric_value
+
+    formatted_value = str(int(numeric_value)) if numeric_value.is_integer() else format(numeric_value, ".12g")
+    for block_index, block in enumerate(plan.blocks):
+        if not isinstance(block, TableBlock) or block.caption != chart_title:
+            continue
+        if len(block.headers) < 2:
+            continue
+        table_categories = [row[0].strip() for row in block.rows]
+        if table_categories != chart.categories:
+            continue
+        if block.headers.count(series_name) != 1:
+            if series_name in block.headers:
+                raise ValueError(
+                    f"linked table '{chart_title}' has ambiguous header '{series_name}'"
+                )
+            continue
+        column = block.headers.index(series_name)
+        payload["blocks"][block_index]["rows"][category_index][column] = formatted_value
+
+    updated_series_values = payload["blocks"][chart_index]["series"][series_index]["values"]
+    for block_index, block in enumerate(plan.blocks):
+        if not isinstance(block, MetricBlock) or block.derivation is None:
+            continue
+        derivation = block.derivation
+        if (
+            derivation.source_chart_title != chart_title
+            or derivation.series != series_name
+            or derivation.kind != "percent_decrease"
+        ):
+            continue
+        from_index = chart.categories.index(derivation.from_category)
+        to_index = chart.categories.index(derivation.to_category)
+        from_value = float(updated_series_values[from_index])
+        to_value = float(updated_series_values[to_index])
+        if from_value > 0 and to_value <= from_value:
+            expected = (from_value - to_value) / from_value * 100.0
+            payload["blocks"][block_index]["value"] = _format_percentage_like(
+                block.value, expected
+            )
+
+    return DocumentPlan.model_validate(payload)
 
 
 def assign_block_ids(plan: DocumentPlan) -> list[dict]:
