@@ -13,7 +13,7 @@ import json
 import zipfile
 from io import BytesIO
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from lxml import etree
 
@@ -57,16 +57,14 @@ def _has_nested_paragraph(paragraph: etree._Element) -> bool:
     return bool(paragraph.xpath(".//hp:p", namespaces=NS))
 
 
-def _paragraph_slots(root: etree._Element, preview_len: int) -> list[dict[str, Any]]:
-    slots: list[dict[str, Any]] = []
+def _iter_paragraph_slots(root: etree._Element, preview_len: int) -> Iterator[dict[str, Any]]:
     for index, paragraph in enumerate(root.xpath(".//hp:p", namespaces=NS)):
         text = _direct_text(paragraph)
         if not text.strip():
             continue
         if _has_nested_paragraph(paragraph):
             continue
-        slots.append(
-            {
+        yield {
                 "key": f"p:{index}",
                 "kind": "paragraph",
                 "index": index,
@@ -74,17 +72,15 @@ def _paragraph_slots(root: etree._Element, preview_len: int) -> list[dict[str, A
                 "text_len": len(text),
                 "text_len_nospace": _normalized_len(text),
                 "preview": _preview(text, preview_len),
+                "_full_text": text,
             }
-        )
-    return slots
 
 
-def _cell_slots(
+def _iter_cell_slots(
     root: etree._Element,
     preview_len: int,
     include_empty: bool,
-) -> list[dict[str, Any]]:
-    slots: list[dict[str, Any]] = []
+) -> Iterator[dict[str, Any]]:
     for table_index, table in enumerate(root.xpath(".//hp:tbl", namespaces=NS)):
         seen: dict[tuple[str, str], int] = {}
         for cell in table.xpath(".//hp:tc", namespaces=NS):
@@ -101,8 +97,7 @@ def _cell_slots(
             key = f"cell:{table_index}:{row}:{col}"
             if occurrence:
                 key += f":{occurrence}"
-            slots.append(
-                {
+            yield {
                     "key": key,
                     "kind": "cell",
                     "table": table_index,
@@ -114,9 +109,35 @@ def _cell_slots(
                     "text_len_nospace": _normalized_len(text),
                     "empty": not bool(text.strip()),
                     "preview": _preview(text, preview_len),
+                    "_full_text": text,
                 }
-            )
-    return slots
+
+
+def iter_slots(
+    path: Path,
+    preview_len: int = 80,
+    include_empty_cells: bool = True,
+) -> Iterator[dict[str, Any]]:
+    """Yield slots without constructing the complete response-sized slot list."""
+    root = _parse_section(path)
+    yield from _iter_paragraph_slots(root, preview_len)
+    yield from _iter_cell_slots(root, preview_len, include_empty_cells)
+
+
+def summarize_slots(path: Path, include_empty_cells: bool = False) -> dict[str, int]:
+    """Return counts only; previews and a complete slot list are never created."""
+    paragraph_count = 0
+    cell_count = 0
+    for slot in iter_slots(path, preview_len=1, include_empty_cells=include_empty_cells):
+        if slot["kind"] == "paragraph":
+            paragraph_count += 1
+        else:
+            cell_count += 1
+    return {
+        "total_slots": paragraph_count + cell_count,
+        "paragraph_slots": paragraph_count,
+        "cell_slots": cell_count,
+    }
 
 
 def collect_slots(
@@ -124,28 +145,28 @@ def collect_slots(
     preview_len: int = 80,
     include_empty_cells: bool = True,
 ) -> dict[str, Any]:
-    root = _parse_section(path)
-    paragraph_slots = _paragraph_slots(root, preview_len)
-    cell_slots = _cell_slots(root, preview_len, include_empty_cells)
+    slots = list(iter_slots(path, preview_len, include_empty_cells))
+    for slot in slots:
+        slot.pop("_full_text", None)
     return {
         "source": str(path),
         "version": 1,
         "usage": "Fill with scripts/edit_hwpx.py template.hwpx -o out.hwpx --slot-json values.json",
-        "slots": paragraph_slots + cell_slots,
+        "slots": slots,
     }
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="HWPX 편집 가능 텍스트 슬롯 추출")
-    parser.add_argument("input", type=Path, help="템플릿 .hwpx")
-    parser.add_argument("--output", "-o", type=Path, help="슬롯 JSON 저장 경로")
+    parser = argparse.ArgumentParser(description="HWPX ?몄쭛 媛???띿뒪???щ’ 異붿텧")
+    parser.add_argument("input", type=Path, help="?쒗뵆由?.hwpx")
+    parser.add_argument("--output", "-o", type=Path, help="?щ’ JSON ???寃쎈줈")
     parser.add_argument("--preview-len", type=int, default=80)
     parser.add_argument(
         "--no-empty-cells",
         action="store_true",
-        help="빈 표 셀 슬롯을 출력하지 않음",
+        help="鍮???? ?щ’??異쒕젰?섏? ?딆쓬",
     )
-    parser.add_argument("--pretty", action="store_true", help="표 형태 요약 출력")
+    parser.add_argument("--pretty", action="store_true", help="???뺥깭 ?붿빟 異쒕젰")
     args = parser.parse_args()
 
     profile = collect_slots(
@@ -176,3 +197,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

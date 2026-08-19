@@ -1,0 +1,468 @@
+openapi: 3.1.0
+info:
+  title: HWPX Skill API
+  version: 0.3.0
+  description: Inspect, search, validate, edit, and rebuild HWPX documents through GPT Actions.
+
+servers:
+  - url: https://hwpxskill-api.onrender.com
+
+paths:
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Check whether the HWPX API is running.
+      responses:
+        "200":
+          description: Service health.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /action/inspect-summary:
+    post:
+      operationId: inspectHwpx
+      summary: Inspect an uploaded HWPX and return a small structural summary.
+      description: Use this first to confirm an uploaded HWPX can be read. For rebuilding, use inspectHwpxPage to read its text in chunks.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [openaiFileIdRefs]
+              properties:
+                openaiFileIdRefs:
+                  type: array
+                  minItems: 1
+                  maxItems: 1
+                  items:
+                    $ref: "#/components/schemas/ActionFileRef"
+                include_empty_cells:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          description: Compact document summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InspectSummaryResponse"
+
+  /action/inspect-page:
+    post:
+      operationId: inspectHwpxPage
+      summary: Read text from an uploaded HWPX in small paged chunks.
+      description: For rich rebuilds, start at offset 0 and repeat with next_offset until has_more is false. Then call createRichHwpx with the reconstructed content.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InspectPageRequest"
+      responses:
+        "200":
+          description: One page of HWPX text slots.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InspectPageResponse"
+
+  /action/find:
+    post:
+      operationId: findHwpxText
+      summary: Find a phrase in an uploaded HWPX and return matching editable slots.
+      description: Use this to locate exact slot keys before minimal edits. Retry with a more specific phrase if too many results match.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FindRequest"
+      responses:
+        "200":
+          description: Compact matching slots.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FindResponse"
+
+  /action/validate:
+    post:
+      operationId: validateHwpx
+      summary: Validate one HWPX file uploaded in the current conversation.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [openaiFileIdRefs]
+              properties:
+                openaiFileIdRefs:
+                  type: array
+                  minItems: 1
+                  maxItems: 1
+                  items:
+                    $ref: "#/components/schemas/ActionFileRef"
+      responses:
+        "200":
+          description: Validation result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidateResponse"
+
+  /action/edit:
+    post:
+      operationId: editHwpx
+      summary: Make minimal text or value edits while preserving current HWPX structure.
+      description: Use only for minimal edits. For charts, new tables, redesign, hierarchy, emphasis, reorganization, or richer reports, use createRichHwpx instead.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EditRequest"
+      responses:
+        "200":
+          description: Edited HWPX result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EditResponse"
+
+  /action/create-from-template:
+    post:
+      operationId: createHwpxFromTemplate
+      summary: Create a new HWPX using an uploaded HWPX as its formatting template.
+      description: Use only when the user wants to preserve uploaded formatting. For visual redesign, new tables, or charts, use createRichHwpx.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFromTemplateRequest"
+      responses:
+        "200":
+          description: Created HWPX result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EditResponse"
+
+  /action/create:
+    post:
+      operationId: createHwpx
+      summary: Create a simple title-and-paragraph HWPX.
+      description: Use only for simple documents without tables, charts, or rich hierarchy. For professional reports use createRichHwpx.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateHwpxRequest"
+      responses:
+        "200":
+          description: Created HWPX result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EditResponse"
+
+  /action/create-rich:
+    post:
+      operationId: createRichHwpx
+      summary: Create a professional HWPX with tables and PNG charts.
+      description: Builds and validates the HWPX. Present download_url directly to the user as a clickable link; do not fetch it through an Action.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRichHwpxRequest"
+      responses:
+        "200":
+          description: Rich HWPX generation result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RichActionResponse"
+
+components:
+  schemas:
+    ActionFileRef:
+      type: object
+      properties:
+        name: {type: string}
+        id: {type: [string, "null"]}
+        mime_type: {type: [string, "null"]}
+        download_link: {type: string, format: uri}
+      required: [name, download_link]
+
+    SlotEdit:
+      type: object
+      properties:
+        slot_key:
+          type: string
+          minLength: 3
+          pattern: "^(p:\\d+|cell:\\d+:\\d+:\\d+(?::\\d+)?)$"
+        new_text: {type: string}
+      required: [slot_key, new_text]
+      additionalProperties: false
+
+    TextReplacement:
+      type: object
+      properties:
+        old_text: {type: string, minLength: 1}
+        new_text: {type: string}
+      required: [old_text, new_text]
+      additionalProperties: false
+
+    ParagraphEdit:
+      type: object
+      properties:
+        paragraph_index: {type: integer, minimum: 0}
+        new_text: {type: string}
+      required: [paragraph_index, new_text]
+      additionalProperties: false
+
+    InspectPageRequest:
+      type: object
+      properties:
+        openaiFileIdRefs:
+          type: array
+          minItems: 1
+          maxItems: 1
+          items:
+            $ref: "#/components/schemas/ActionFileRef"
+        include_empty_cells: {type: boolean, default: false}
+        preview_len: {type: integer, minimum: 10, maximum: 80, default: 80}
+        offset: {type: integer, minimum: 0, default: 0}
+        limit: {type: integer, minimum: 1, maximum: 10, default: 10}
+        search_text: {type: [string, "null"], maxLength: 200, default: null}
+      required: [openaiFileIdRefs]
+      additionalProperties: false
+
+    FindRequest:
+      type: object
+      properties:
+        openaiFileIdRefs:
+          type: array
+          minItems: 1
+          maxItems: 1
+          items:
+            $ref: "#/components/schemas/ActionFileRef"
+        search_text: {type: string, minLength: 1, maxLength: 200}
+        include_empty_cells: {type: boolean, default: false}
+        preview_len: {type: integer, minimum: 20, maximum: 120, default: 80}
+        limit: {type: integer, minimum: 1, maximum: 10, default: 10}
+      required: [openaiFileIdRefs, search_text]
+      additionalProperties: false
+
+    EditRequest:
+      type: object
+      properties:
+        openaiFileIdRefs:
+          type: array
+          minItems: 1
+          maxItems: 1
+          items:
+            $ref: "#/components/schemas/ActionFileRef"
+        slot_edits:
+          type: array
+          items: {$ref: "#/components/schemas/SlotEdit"}
+          default: []
+        text_replacements:
+          type: array
+          items: {$ref: "#/components/schemas/TextReplacement"}
+          default: []
+        paragraph_edits:
+          type: array
+          items: {$ref: "#/components/schemas/ParagraphEdit"}
+          default: []
+        allow_over_budget: {type: boolean, default: false}
+      required: [openaiFileIdRefs]
+      additionalProperties: false
+
+    CreateFromTemplateRequest:
+      type: object
+      properties:
+        openaiFileIdRefs:
+          type: array
+          minItems: 1
+          maxItems: 1
+          items:
+            $ref: "#/components/schemas/ActionFileRef"
+        title: {type: string, minLength: 1}
+        paragraphs:
+          type: array
+          minItems: 1
+          items: {type: string}
+        output_filename: {type: string, minLength: 6, default: created_from_template.hwpx}
+      required: [openaiFileIdRefs, title, paragraphs]
+      additionalProperties: false
+
+    CreateHwpxRequest:
+      type: object
+      properties:
+        title: {type: string, minLength: 1}
+        paragraphs:
+          type: array
+          minItems: 1
+          maxItems: 30
+          items: {type: string}
+        output_filename: {type: string, minLength: 6, default: created.hwpx}
+      required: [title, paragraphs]
+      additionalProperties: false
+
+    CreateRichHwpxRequest:
+      type: object
+      description: Markdown for a new or rebuilt rich HWPX. Use ```chart fences for server-rendered PNG charts.
+      properties:
+        filename: {type: string, minLength: 6, default: report.hwpx}
+        markdown:
+          type: string
+          minLength: 1
+          description: Full Markdown document. May contain Markdown tables and ```chart fences.
+        preset:
+          type: string
+          enum: [보고서, 기안문, 계획서, 통지, 회의록, 개조식, 보도자료]
+          default: 보고서
+      required: [markdown]
+      additionalProperties: false
+
+    HealthResponse:
+      type: object
+      properties:
+        status: {type: string}
+        service: {type: string}
+        version: {type: string}
+      required: [status, service, version]
+
+    Slot:
+      type: object
+      properties:
+        key: {type: string}
+        kind: {type: string}
+        max_chars: {type: integer}
+        preview: {type: string}
+        table: {type: integer}
+        row: {type: integer}
+        col: {type: integer}
+        occurrence: {type: integer}
+        empty: {type: boolean}
+      required: [key, kind, preview]
+      additionalProperties: true
+
+    InspectSummaryResponse:
+      type: object
+      properties:
+        ok: {type: boolean}
+        source: {type: string}
+        total_slots: {type: integer}
+        paragraph_slots: {type: integer}
+        cell_slots: {type: integer}
+      required: [ok, source, total_slots, paragraph_slots, cell_slots]
+
+    InspectPageResponse:
+      type: object
+      properties:
+        ok: {type: boolean}
+        source: {type: string}
+        matched_slots: {type: integer}
+        offset: {type: integer}
+        returned: {type: integer}
+        has_more: {type: boolean}
+        next_offset: {type: [integer, "null"]}
+        slots:
+          type: array
+          maxItems: 10
+          items: {$ref: "#/components/schemas/Slot"}
+        error_stage: {type: [string, "null"]}
+        error_message: {type: [string, "null"]}
+      required: [ok, source, matched_slots, offset, returned, has_more, slots]
+
+    FindResponse:
+      type: object
+      properties:
+        ok: {type: boolean}
+        source: {type: string}
+        search_text: {type: string}
+        matched_slots: {type: integer}
+        returned: {type: integer}
+        truncated: {type: boolean}
+        slots:
+          type: array
+          maxItems: 10
+          items: {$ref: "#/components/schemas/Slot"}
+      required: [ok, source, search_text, matched_slots, returned, truncated, slots]
+
+    ValidateResponse:
+      type: object
+      properties:
+        valid: {type: boolean}
+        errors:
+          type: array
+          items: {type: string}
+        layout_warning_count: {type: integer}
+        layout_warnings:
+          type: array
+          items: {type: string}
+      required: [valid, errors, layout_warning_count, layout_warnings]
+
+    OpenAIFile:
+      type: object
+      properties:
+        name: {type: string}
+        mime_type: {type: string}
+        content: {type: string, format: byte}
+      required: [name, mime_type, content]
+
+    EditResponse:
+      type: object
+      properties:
+        ok: {type: boolean}
+        validated: {type: boolean}
+        layout_warning_count: {type: integer}
+        openaiFileResponse:
+          type: array
+          items: {$ref: "#/components/schemas/OpenAIFile"}
+      required: [ok, validated, layout_warning_count, openaiFileResponse]
+
+    RichActionResponse:
+      type: object
+      properties:
+        ok: {type: boolean}
+        validated: {type: boolean}
+        layout_warning_count: {type: integer}
+        filename: {type: [string, "null"]}
+        download_url:
+          type: [string, "null"]
+          format: uri
+          description: Present this URL directly to the user as a clickable link.
+        error_stage: {type: [string, "null"]}
+        error_message: {type: [string, "null"]}
+      required: [ok, validated, layout_warning_count]
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
