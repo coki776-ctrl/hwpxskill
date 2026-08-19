@@ -30,6 +30,87 @@ jobs:
         run: |
           python -m py_compile kordoc_engine.py rich_action_kordoc.py rich_action_ext.py rich_charts.py document_plan.py track_c_eval.py
           pytest -q tests/test_kordoc_engine.py tests/test_rich_charts.py tests/test_document_plan.py tests/test_track_c_eval.py tests/test_document_plan_e2e.py tests/test_track_c_consistency_probe.py tests/test_track_c_metric_probe.py tests/test_track_c_local_edit_probe.py
+      - name: Build linked edit HWPX artifact
+        run: |
+          mkdir -p /tmp/track-c-edit
+          python - <<'PY'
+          from pathlib import Path
+          import zipfile
+          import app
+          from document_plan import DocumentPlan, document_plan_to_markdown, update_linked_chart_value
+          from rich_charts import preprocess_chart_fences
+          from kordoc_engine import generate_hwpx
+
+          w = Path('/tmp/track-c-edit')
+          original = DocumentPlan.model_validate({
+              'version': '0.1',
+              'title': '불용액 개선 수정 보고서',
+              'preset': '보고서',
+              'blocks': [
+                  {
+                      'type': 'metric',
+                      'label': '불용액 감소',
+                      'value': '50.0%',
+                      'emphasis': 'positive',
+                      'derivation': {
+                          'kind': 'percent_decrease',
+                          'source_chart_title': '연도별 불용액',
+                          'series': '불용액',
+                          'from_category': '2024',
+                          'to_category': '2025',
+                      },
+                  },
+                  {
+                      'type': 'table',
+                      'caption': '연도별 불용액',
+                      'headers': ['연도', '불용액'],
+                      'rows': [['2024', '2400'], ['2025', '1200']],
+                  },
+                  {
+                      'type': 'chart',
+                      'chart_type': 'column',
+                      'title': '연도별 불용액',
+                      'categories': ['2024', '2025'],
+                      'series': [{'name': '불용액', 'values': [2400, 1200]}],
+                  },
+              ],
+          })
+          edited = update_linked_chart_value(
+              original,
+              chart_title='연도별 불용액',
+              series_name='불용액',
+              category='2025',
+              value=1000,
+          )
+          assert edited.blocks[0].value == '58.3%'
+          assert edited.blocks[1].rows[1][1] == '1000'
+          assert edited.blocks[2].series[0].values[1] == 1000
+
+          semantic = document_plan_to_markdown(edited)
+          rendered, count = preprocess_chart_fences(semantic, w)
+          assert count == 1
+          chart_bytes = (w / 'chart_1.png').read_bytes()
+          md = w / 'edited_input.md'
+          out = w / 'track_c_linked_edit.hwpx'
+          md.write_text(rendered, encoding='utf-8')
+          result = generate_hwpx(md, out, preset=edited.preset, timeout=120)
+          assert result.ok, result.diagnostic
+          app.add_hancom_compatibility_metadata(out)
+          assert app.validate_hwpx(str(out)) == []
+          with zipfile.ZipFile(out) as z:
+              names = z.namelist()
+              section = z.read('Contents/section0.xml').decode('utf-8')
+              embedded = [z.read(n) for n in names if n.lower().endswith('.png')]
+              assert '58.3%' in section
+              assert '2400' in section
+              assert '1000' in section
+              assert '1200' not in section
+              assert section.count('<hp:tbl') >= 1
+              assert any(data == chart_bytes for data in embedded)
+              assert 'version.xml' in names
+              assert 'settings.xml' in names
+          print('TRACK_C_LINKED_EDIT_OK', out.stat().st_size)
+          PY
       - name: Long report regression
         run: |
           mkdir -p /tmp/kordoc-long
@@ -91,9 +172,16 @@ jobs:
         run: |
           mkdir -p artifacts
           cp /tmp/kordoc-long/long_report.hwpx artifacts/kordoc_long_regression_report.hwpx
+          cp /tmp/track-c-edit/track_c_linked_edit.hwpx artifacts/track_c_linked_edit.hwpx
       - uses: actions/upload-artifact@v4
         with:
           name: kordoc-long-regression-report
           path: artifacts/kordoc_long_regression_report.hwpx
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: track-c-linked-edit-hwpx
+          path: artifacts/track_c_linked_edit.hwpx
           if-no-files-found: error
           retention-days: 7
