@@ -16,12 +16,16 @@ _CHART_FENCE_RE = re.compile(
 _RESERVED_KEYS = {"type", "cat", "size", "colors", "point_colors", "title"}
 
 _FONT_READY = False
+_FONT_FAMILY: str | None = None
 
 
-def _configure_korean_font() -> None:
-    global _FONT_READY
+def _configure_korean_font() -> str:
+    global _FONT_READY, _FONT_FAMILY
     if _FONT_READY:
-        return
+        if _FONT_FAMILY is None:  # pragma: no cover - defensive guard
+            raise RuntimeError("Korean chart font state is invalid")
+        return _FONT_FAMILY
+
     candidates = (
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/opentype/noto/NotoSansCJKkr-Regular.otf",
@@ -35,11 +39,20 @@ def _configure_korean_font() -> None:
             font_manager.fontManager.addfont(str(path))
             family = font_manager.FontProperties(fname=str(path)).get_name()
             plt.rcParams["font.family"] = family
+            _FONT_FAMILY = family
             break
         except Exception:
             continue
+
+    if _FONT_FAMILY is None:
+        raise RuntimeError(
+            "Korean chart font not found. Install fonts-noto-cjk or provide "
+            "NotoSansCJK/NanumGothic at a supported path."
+        )
+
     plt.rcParams["axes.unicode_minus"] = False
     _FONT_READY = True
+    return _FONT_FAMILY
 
 
 def _parse_number_list(value: str) -> list[float]:
